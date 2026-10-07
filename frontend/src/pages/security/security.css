@@ -1,0 +1,251 @@
+.security-tabs,
+.graph-nodes,
+.security-pagination {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+.security-tabs [aria-selected="true"],
+.graph-nodes [aria-pressed="true"] {
+  border-color: #49aa89;
+  background: #e8f6f0;
+  color: #136147;
+}
+.demo-banner {
+  padding: 12px;
+  background: #fff4d4;
+  color: #735312;
+  border-radius: 8px;
+}
+.evidence-card {
+  padding: 18px;
+  border: 1px solid #dbe2e7;
+  border-radius: 10px;
+  margin: 14px 0;
+}
+.evidence-card h3 {
+  margin: 8px 0;
+}
+.evidence-card pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  background: #f3f5f7;
+  font-size: 13px;
+}
+.evidence-timeline {
+  padding-left: 22px;
+}
+.severity {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.severity-high,
+.severity-critical {
+  background: #fee7e7;
+  color: #9c2929;
+}
+.severity-medium {
+  background: #fff2d6;
+  color: #755000;
+}
+.severity-low,
+.severity-info {
+  background: #eaf1fa;
+  color: #285c86;
+}
+.provenance {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) 2fr;
+  gap: 16px;
+}
+.provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.security-analysis input {
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid #dbe2e7;
+  border-radius: 6px;
+}
+.evidence-graph li {
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+}
+.security-analysis button:focus-visible {
+  outline: 3px solid #4279ae;
+  outline-offset: 3px;
+}
+.feedback {
+  padding: 18px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 16px 0;
+}
+.feedback-error {
+  border-color: #c85050;
+}
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px;
+}
+.plain-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.security-links,
+.severity-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0;
+}
+.security-tabs a,
+.security-links a {
+  text-decoration: none;
+}
+.selected-tab {
+  background: #e5f4e5 !important;
+  border-color: #287239 !important;
+}
+.graph-canvas {
+  overflow: auto;
+  max-height: 650px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.finding-dialog {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  width: min(650px, calc(100vw - 24px));
+  max-height: 85vh;
+  overflow: auto;
+  color: var(--ink);
+}
+.finding-dialog::backdrop {
+  background: #17253688;
+}
+.finding-dialog p,
+.finding-dialog li {
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.selected-evidence {
+  border: 2px solid #287239;
+}
+.risk-summary {
+  background: #f5f9f3;
+  padding: 16px;
+  border-radius: 10px;
+}
+.skip-link {
+  position: fixed;
+  left: 15px;
+  top: -100px;
+  z-index: 100;
+  background: white;
+  padding: 15px;
+}
+.skip-link:focus {
+  top: 10px;
+}
+.detail-banner .hash {
+  min-width: 0;
+  max-width: 100%;
+}
+.detail-banner .hash b {
+  overflow-wrap: anywhere;
+}
+.security-analysis .artifact-table {
+  min-width: 540px;
+}
+.security-analysis .toolbar input {
+  flex: 1;
+  min-width: 140px;
+}
+.btn:disabled,
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.detail-card {
+  margin-top: 16px;
+}
+.main-area {
+  min-width: 0;
+}
+.security-analysis,
+.detail-card {
+  overflow-wrap: anywhere;
+}
+.graph-nodes .btn {
+  white-space: normal;
+}
+.severity-counts .severity {
+  font-size: 12px;
+}
+@media (max-width: 600px) {
+  .provenance {
+    grid-template-columns: 1fr;
+  }
+  .security-tabs {
+    gap: 6px;
+  }
+  .security-tabs .btn {
+    padding: 8px;
+  }
+  .pagination {
+    gap: 8px;
+  }
+  .finding-dialog {
+    padding: 16px;
+  }
+  .sidebar.mobile-open .mobile-close {
+    display: block;
+  }
+  .security-analysis .toolbar {
+    padding: 10px 0;
+  }
+  .security-analysis .toolbar input {
+    flex-basis: 100%;
+  }
+  .page-body footer {
+    flex-wrap: wrap;
+  }
+}
+@media print {
+  .sidebar,
+  .topbar,
+  .mobile-nav,
+  .back-link,
+  .btn,
+  .security-links,
+  .security-tabs {
+    display: none !important;
+  }
+  .main-area {
+    margin-left: 0 !important;
+  }
+  .page-body {
+    padding: 0 !important;
+  }
+  .detail-card {
+    break-inside: avoid;
+  }
+  .graph-canvas {
+    max-height: none;
+    overflow: visible;
+  }
+}

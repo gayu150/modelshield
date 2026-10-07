@@ -1,32 +1,180 @@
-﻿import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { Activity, ArrowRight, Bell, Box, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, FileCode2, FileKey2, FileText, Fingerprint, LayoutDashboard, LockKeyhole, Menu, MoreHorizontal, Plus, Search, Shield, ShieldAlert, ShieldCheck, SlidersHorizontal, UploadCloud, X } from 'lucide-react';
-import type { Artifact, Decision } from './types/artifact';
-import { listArtifacts, uploadArtifact } from './services/api/artifacts';
-import LoginPage from './pages/LoginPage';
-import ReviewQueuePage from './pages/ReviewQueuePage';
-import GovernancePage from './pages/GovernancePage';
-const sample: Artifact[] = [
-{id:'MOD-0042',name:'fraud-detection-v3.pkl',model:'Fraud Detection',version:'3.1.0',format:'PICKLE',uploadedBy:'Priya Sharma',uploadedAt:'Today, 10:24 AM',decision:'APPROVED',findings:0,hash:'a81f93c4d69b…a2d29b'},
-{id:'MOD-0041',name:'customer-churn.onnx',model:'Customer Churn',version:'2.4.1',format:'ONNX',uploadedBy:'Arjun Mehta',uploadedAt:'Today, 9:12 AM',decision:'QUARANTINED',findings:2,hash:'6c0de82158f1…8841f44'},
-{id:'MOD-0040',name:'recommendation-v2.safetensors',model:'Recommendations',version:'2.0.0',format:'SAFETENSORS',uploadedBy:'Priya Sharma',uploadedAt:'Yesterday, 4:38 PM',decision:'CONDITIONAL',findings:1,hash:'9b7a31f0f231…b09c612'},
-{id:'MOD-0039',name:'sentiment-analysis.h5',model:'Sentiment Analysis',version:'1.8.2',format:'HDF5',uploadedBy:'Dev Patel',uploadedAt:'Yesterday, 2:05 PM',decision:'APPROVED',findings:0,hash:'f3028ad10c72…748b095'},
-{id:'MOD-0038',name:'legacy-classifier.pth',model:'Legacy Classifier',version:'1.2.0',format:'PYTORCH',uploadedBy:'Maya Iyer',uploadedAt:'Sep 26, 2026',decision:'BLOCKED',findings:4,hash:'1ce4bd6983a7…0c1774a'}];
-const mock=import.meta.env.VITE_USE_MOCK_DATA!=='false';
-type Route={page:'dashboard'|'artifacts'|'upload'|'detail'|'login'|'review-queue'|'governance'|'policies'|'audit-trail';id?:string};
-const readRoute=():Route=>{const [a,b]=location.hash.replace(/^#\/?/,'').split('/');if(a==='artifacts'&&b==='new')return{page:'upload'};if(a==='artifacts'&&b)return{page:'detail',id:decodeURIComponent(b)};if(a==='artifacts')return{page:'artifacts'};if(a==='review-queue')return{page:'review-queue'};if(a==='governance')return{page:'governance'};if(a==='policies')return{page:'policies'};if(a==='audit-trail')return{page:'audit-trail'};if(a==='login')return{page:'login'};return{page:'dashboard'};};
-const go=(path:string)=>{location.hash=path;};
-function Status({value}:{value:Decision}){const I=value==='APPROVED'?ShieldCheck:value==='BLOCKED'?ShieldAlert:Clock3;return <span className={'status '+value.toLowerCase()}><I size={13}/>{value[0]+value.slice(1).toLowerCase()}</span>;}
-function Heading({tag,title,desc,action}:{tag:string;title:string;desc:string;action?:ReactNode}){return <div className="page-head"><div><div className="kicker"><i/>{tag}</div><h1>{title}</h1><p>{desc}</p></div>{action}</div>;}
-function Rows({items,onOpen}:{items:Artifact[];onOpen:(id:string)=>void}){return <div className="table-scroll"><table className="artifact-table"><thead><tr><th>ARTIFACT</th><th>DECISION</th><th>FINDINGS</th><th>OWNER</th><th>UPDATED</th><th/></tr></thead><tbody>{items.map(x=><tr key={x.id} onClick={()=>onOpen(x.id)}><td><div className="artifact-cell"><span className={'file-tile '+x.format.toLowerCase()}><FileCode2 size={17}/></span><span><b>{x.name}</b><small>{x.id} <i/> {x.format}</small></span></div></td><td><Status value={x.decision}/></td><td>{x.findings?<span className="has-findings"><ShieldAlert size={13}/>{x.findings} findings</span>:<span className="no-findings"><Check size={13}/>No findings</span>}</td><td>{x.uploadedBy}</td><td className="muted">{x.uploadedAt}</td><td><MoreHorizontal size={17} className="muted"/></td></tr>)}</tbody></table>{!items.length&&<div className="empty"><Search size={20}/><b>No artifacts found</b><span>Try another search or status.</span></div>}</div>;}
-function Dashboard({items}:{items:Artifact[]}){return <><Heading tag="SECURITY OVERVIEW" title="Good morning, Priya" desc="Your model releases, integrity checks, and review activity at a glance." action={<button className="btn primary" onClick={()=>go('/artifacts/new')}><Plus size={16}/>Upload artifact</button>}/><div className="metrics"><div><span>Artifacts monitored</span><Box/><b>24</b><small><em>↗ 12%</em> from last month</small></div><div><span>Approved for release</span><ShieldCheck/><b>18</b><small><em>75%</em> of monitored artifacts</small></div><div><span>Awaiting review</span><Clock3/><b>03</b><small className="attention">2 need attention</small></div><div><span>Blocked this month</span><LockKeyhole/><b>03</b><small>12.5% block rate</small></div></div><section className="pipeline-card"><span className="pipeline-icon"><Fingerprint/></span><div><small>MODEL RELEASE PIPELINE</small><b>Evidence first. Controlled release.</b><p>Each artifact is hashed, analyzed, and evaluated against a versioned policy.</p></div><div className="security-orbit" aria-hidden="true"><svg className="security-art" viewBox="0 0 150 130"><circle className="art-orbit outer" cx="75" cy="64" r="51"/><circle className="art-orbit inner" cx="75" cy="64" r="39"/><path className="art-link" d="M28 91 45 79l10 7m51-49 15-10m-4 66 13 8M42 43l-12-9"/><circle className="art-node" cx="28" cy="91" r="4"/><circle className="art-node" cx="121" cy="37" r="4"/><circle className="art-node" cx="130" cy="103" r="3.5"/><circle className="art-node" cx="30" cy="34" r="3.5"/><path className="art-shield" d="m75 35 23 8v20c0 17-9 29-23 37-14-8-23-20-23-37V43z"/><path className="art-check" d="m64 64 8 8 16-18"/><circle className="art-pulse" cx="111" cy="75" r="4"/></svg><small className="security-caption"><i/>LIVE SECURITY SIGNAL</small></div><div className="pipeline-steps"><span>✓ Intake</span><i/><span>✓ Integrity</span><i/><span>✓ Analysis</span><i/><strong>◉ Decision</strong></div></section><section className="content-section"><div className="section-head"><div><h2>Recent artifacts <small>{items.length}</small></h2><p>Latest activity from your model registry</p></div><button className="link-button" onClick={()=>go('/artifacts')}>View all <ArrowRight size={14}/></button></div><Rows items={items.slice(0,5)} onOpen={id=>go('/artifacts/'+encodeURIComponent(id))}/></section><div className="lower-grid"><section className="event-card"><h2>Release activity</h2><p>Recent events in your workspace</p><div className="event"><ShieldCheck/><span><b>fraud-detection-v3.pkl approved</b><small>PROD-SEC-004 v2.0 · Priya Sharma</small></span><time>10:26 AM</time></div><div className="event"><Clock3/><span><b>customer-churn.onnx sent to review</b><small>Provenance evidence is incomplete</small></span><time>9:14 AM</time></div><div className="event"><Fingerprint/><span><b>Artifact fingerprint recorded</b><small>recommendation-v2.safetensors</small></span><time>Yesterday</time></div></section><section className="policy-card"><div className="policy-top"><FileKey2/><span>● ACTIVE</span></div><small>ACTIVE RELEASE POLICY</small><b>Production Model Security</b><p>PROD-SEC-004 <i/> Version 2.0</p><div className="rule">Critical finding <ArrowRight size={14}/> <strong>Block release</strong></div><button className="link-button" onClick={()=>go('/artifacts')}>Review artifacts <ArrowRight size={14}/></button></section></div></>;}
-function ArtifactPage({items}:{items:Artifact[]}){const [search,setSearch]=useState('');const [filter,setFilter]=useState('All decisions');const found=useMemo(()=>items.filter(a=>`${a.name} ${a.model} ${a.id} ${a.uploadedBy}`.toLowerCase().includes(search.toLowerCase())&&(filter==='All decisions'||a.decision.toLowerCase()===filter.toLowerCase())),[items,search,filter]);return <><Heading tag="MODEL REGISTRY" title="Artifacts" desc="Browse, verify, and manage every model artifact in your workspace." action={<button className="btn primary" onClick={()=>go('/artifacts/new')}><Plus size={16}/>Upload artifact</button>}/><div className="registry-summary"><b>{items.length.toString().padStart(2,'0')} <small>tracked</small></b><i/><b className="green-text">{items.filter(a=>a.decision==='APPROVED').length.toString().padStart(2,'0')} <small>approved</small></b><i/><b className="amber-text">{items.filter(a=>a.decision==='QUARANTINED').length.toString().padStart(2,'0')} <small>quarantined</small></b><span>● Registry synced</span></div><section className="list-card"><div className="toolbar"><label><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, ID, or owner"/></label><select value={filter} onChange={e=>setFilter(e.target.value)}><option>All decisions</option>{['Approved','Conditional','Quarantined','Blocked'].map(x=><option key={x}>{x}</option>)}</select><button className="btn outline" onClick={()=>{setSearch('');setFilter('All decisions')}}><SlidersHorizontal size={15}/>Reset</button></div><Rows items={found} onOpen={id=>go('/artifacts/'+encodeURIComponent(id))}/><div className="table-footer">Showing <b>{found.length}</b> of <b>{items.length}</b> artifacts <span>All times are local</span></div></section></>;}
-function UploadPage({onUpload}:{onUpload:(f:File,name:string,version:string)=>Promise<void>}){const [file,setFile]=useState<File>();const [name,setName]=useState('');const [version,setVersion]=useState('1.0.0');const [error,setError]=useState('');const [busy,setBusy]=useState(false);async function submit(e:FormEvent){e.preventDefault();if(!file){setError('Choose a model file to continue.');return;}if(!name.trim()){setError('Enter a model name.');return;}setBusy(true);setError('');try{await onUpload(file,name.trim(),version.trim());}catch{setError('Upload failed. Check the API connection and try again.');}finally{setBusy(false);}}return <><button className="back-link" onClick={()=>go('/artifacts')}><ChevronLeft size={15}/>Back to artifacts</button><Heading tag="ARTIFACT INTAKE" title="Upload a model" desc="New artifacts enter quarantine while ModelShield records their identity."/><form className="upload-grid" onSubmit={submit}><section className="upload-form"><div className="form-title"><i>01</i><span><b>Artifact file</b><small>Select the exact model artifact to review.</small></span></div><label className="dropzone" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f){setFile(f);setName(f.name.replace(/\.[^.]+$/,'').replace(/[-_]/g,' '));}}}><input type="file" accept=".pkl,.pickle,.pth,.pt,.h5,.hdf5,.onnx,.safetensors,.zip,.tar,.gz" onChange={e=>{const f=e.target.files?.[0];if(f){setFile(f);setName(f.name.replace(/\.[^.]+$/,'').replace(/[-_]/g,' '));}}}/><UploadCloud size={26}/><b>{file?file.name:'Drop your model file here'}</b><span>{file?`${(file.size/1048576).toFixed(2)} MB · Ready for quarantine`:<>or <strong>browse files</strong> on your computer</>}</span><small>PKL, PTH, H5, ONNX, SAFETENSORS, ZIP · up to 2 GB</small></label><div className="form-title"><i>02</i><span><b>Model information</b><small>Identify the model version and source.</small></span></div><div className="fields"><label>Model name <em>Required</em><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Fraud Detection"/></label><label>Model version<input value={version} onChange={e=>setVersion(e.target.value)} placeholder="1.0.0"/></label><label className="wide">Source or registry <small>Optional</small><input placeholder="e.g. Internal ML Registry"/></label></div>{error&&<div className="form-error">{error}</div>}<div className="form-actions"><button className="btn outline" type="button" onClick={()=>go('/artifacts')}>Cancel</button><button className="btn primary" disabled={busy}>{busy?'Uploading…':<><UploadCloud size={15}/>Upload to quarantine</>}</button></div></section><aside className="quarantine-info"><LockKeyhole size={22}/><small>SECURITY BY DEFAULT</small><h2>Quarantine first.<br/>Trust with evidence.</h2><p>Your model stays isolated while ModelShield records its SHA-256 fingerprint and prepares security review.</p><div>✓&nbsp; File fingerprint</div><div>②&nbsp; Security analysis</div><div>③&nbsp; Policy decision</div></aside></form></>;}
-function DetailPage({item}:{item?:Artifact}){if(!item)return <section className="not-found"><ShieldAlert/><h2>Artifact not found</h2><button onClick={()=>go('/artifacts')}>Back to artifacts</button></section>;return <><button className="back-link" onClick={()=>go('/artifacts')}><ChevronLeft size={15}/>Back to artifacts</button><Heading tag="ARTIFACT OVERVIEW" title={item.model} desc={`Version ${item.version} · Added ${item.uploadedAt}`} action={<button className="btn outline" onClick={()=>window.print()}><FileText size={14}/>Export record</button>}/><section className="detail-banner"><div className="artifact-cell"><span className={'file-tile '+item.format.toLowerCase()}><FileCode2 size={18}/></span><span><b>{item.name}</b><small>{item.id} · {item.format}</small></span></div><Status value={item.decision}/><i/><span className="hash"><Fingerprint size={16}/><small>SHA-256 <b>{item.hash}</b></small></span><button className="btn outline" onClick={()=>navigator.clipboard?.writeText(item.hash)}><FileKey2 size={14}/>Copy hash</button></section><div className="detail-grid"><div className="detail-main"><section className="detail-card"><h2>Release overview</h2><p>Security posture for this exact artifact version</p><div className="overview"><span>MODEL VERSION<b>{item.version}</b></span><span>OWNER<b>{item.uploadedBy}</b></span><span>FILE FORMAT<b>{item.format}</b></span><span>FINDINGS<b className={item.findings?'amber-text':'green-text'}>{item.findings}</b></span></div></section><section className="detail-card"><h2>Verification checks</h2><p>Evidence attached to this release decision</p>{[['Artifact integrity','SHA-256 recorded for this upload','Recorded'],['Provenance','Publisher signature and origin','Needs evidence'],['Static analysis','Scanner findings attached',item.findings?`${item.findings} findings`:'No findings']].map((row,i)=><div className="verify-row" key={row[0]}><span>{i===0?<Fingerprint size={16}/>:i===1?<FileKey2 size={16}/>:<Activity size={16}/>}</span><b>{row[0]}<small>{row[1]}</small></b><em className={i===1?'amber-text':'green-text'}>{row[2]}</em></div>)}</section><section className="detail-card"><h2>Decision history</h2><p>Recorded changes for this artifact</p><div className="history"><b>Artifact uploaded to quarantine<small>{item.uploadedBy} · {item.uploadedAt}</small></b><b>Integrity fingerprint recorded<small>SHA-256 {item.hash}</small></b><b>Decision: {item.decision}<small>PROD-SEC-004 · Version 2.0</small></b></div></section></div><aside className={'decision-card '+item.decision.toLowerCase()}><small>CURRENT DECISION</small><span>{item.decision==='APPROVED'?<ShieldCheck size={24}/>:item.decision==='BLOCKED'?<ShieldAlert size={24}/>:<Clock3 size={24}/>}</span><h2>{item.decision[0]+item.decision.slice(1).toLowerCase()}</h2><p>{item.decision==='APPROVED'?'This artifact meets the active release policy.':'Additional evidence or reviewer action is required.'}</p><hr/><small>EVALUATED AGAINST</small><b><FileKey2 size={14}/> PROD-SEC-004 · v2.0</b></aside></div></>;}
-function App(){const [route,setRoute]=useState<Route>(readRoute);const [items,setItems]=useState(sample);const [notice,setNotice]=useState('');const [mobile,setMobile]=useState(false);const [signedIn,setSignedIn]=useState(true);useEffect(()=>{const change=()=>setRoute(readRoute());addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change)},[]);useEffect(()=>{if(mock)return;let active=true;listArtifacts().then(data=>{if(active)setItems(data)}).catch(()=>{if(active)setNotice('Could not load artifacts. Check that the API is running.')});return()=>{active=false}},[]);useEffect(()=>{if(!notice)return;const id=setTimeout(()=>setNotice(''),3500);return()=>clearTimeout(id)},[notice]);async function addArtifact(file:File,name:string,version:string){const item:Artifact=mock?{id:`MOD-${43+items.length-sample.length}`,name:file.name,model:name,version,format:file.name.split('.').pop()?.toUpperCase()||'UNKNOWN',uploadedBy:'Priya Sharma',uploadedAt:'Just now',decision:'QUARANTINED',findings:0,hash:'Pending verification'}:await uploadArtifact({file,modelName:name,version});setItems(prev=>[item,...prev]);setNotice('Artifact placed in quarantine. Integrity review is pending.');go('/artifacts/'+encodeURIComponent(item.id));}const active=route.page==='detail'?'artifacts':route.page;const detail=items.find(x=>x.id===route.id);if(!signedIn||route.page==='login')return <LoginPage onLogin={()=>{setSignedIn(true);go('/dashboard')}}/>;return <div className="app-shell"><aside className={`sidebar ${mobile?'mobile-open':''}`}><button className="brand" onClick={()=>go('/dashboard')}><span className="brand-icon"><Shield size={20} fill="currentColor"/></span><span>model<span>shield</span><small>MODEL SECURITY PLATFORM</small></span><i className="mobile-close"><X size={17}/></i></button><div className="workspace"><b>N</b><span>Northstar AI<small>Enterprise workspace</small></span><ChevronDown size={14}/></div><nav><small className="nav-label">WORKSPACE</small><button className={active==='dashboard'?'active':''} onClick={()=>go('/dashboard')}><LayoutDashboard size={17}/>Dashboard</button><button className={active==='artifacts'||active==='upload'?'active':''} onClick={()=>go('/artifacts')}><Box size={17}/>Artifacts<em>{items.length}</em></button><button className={active==='review-queue'?'active':''} onClick={()=>go('/review-queue')}><ShieldAlert size={17}/>Review queue<em>{items.filter(x=>['QUARANTINED','CONDITIONAL'].includes(x.decision)).length}</em></button><small className="nav-label secondary">GOVERNANCE</small><button className={active==='policies'?'active':''} onClick={()=>go('/policies')}><FileKey2 size={17}/>Policies</button><button className={active==='audit-trail'?'active':''} onClick={()=>go('/audit-trail')}><Activity size={17}/>Audit trail</button></nav><div className="sidebar-bottom"><button className="help-row" onClick={()=>setNotice('Help center coming soon.')}><span>?</span><b>Need a hand?<small>Visit the help center</small></b><ArrowRight size={14}/></button><button className="user-row" onClick={()=>{setSignedIn(false);go('/login')}}><span className="avatar">PS</span><b>Priya Sharma<small>Security reviewer</small></b><MoreHorizontal size={18}/></button></div></aside>{mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Close menu"/>}<main className="main-area"><header className="topbar"><div className="crumb"><button className="mobile-menu" onClick={()=>setMobile(true)} aria-label="Open menu"><Menu size={19}/></button>Workspace <ChevronRight size={14}/><b>{route.page==='detail'?'Artifact overview':route.page==='upload'?'Upload artifact':route.page==='review-queue'?'Review queue':route.page==='audit-trail'?'Audit trail':route.page==='policies'?'Policies':route.page[0].toUpperCase()+route.page.slice(1)}</b></div><div className="top-right"><span className="env"><i/>PRODUCTION</span><button className="bell" onClick={()=>setNotice('You’re all caught up.')}><Bell size={18}/><i/></button><span className="avatar">PS</span></div></header><main className="page-body">{route.page==='dashboard'&&<Dashboard items={items}/ >}{route.page==='artifacts'&&<ArtifactPage items={items}/ >}{route.page==='upload'&&<UploadPage onUpload={addArtifact}/ >}{route.page==='detail'&&<DetailPage item={detail}/ >}{route.page==='review-queue'&&<ReviewQueuePage items={items} onOpen={id=>go('/artifacts/'+encodeURIComponent(id))}/ >}{(route.page==='governance'||route.page==='policies'||route.page==='audit-trail')&&<GovernancePage section={route.page==='governance'?'all':route.page==='policies'?'policies':'audit'}/ >}<footer>© 2026 ModelShield <span><i/>All systems operational</span><a href="#security">Security <ArrowRight size={12}/></a></footer></main></main><nav className="mobile-nav" aria-label="Primary navigation"><button className={active==='dashboard'?'current':''} aria-current={active==='dashboard'?'page':undefined} onClick={()=>{setMobile(false);go('/dashboard')}}><LayoutDashboard size={19}/><span>Home</span></button><button className={active==='artifacts'||active==='upload'?'current':''} aria-current={active==='artifacts'||active==='upload'?'page':undefined} onClick={()=>{setMobile(false);go('/artifacts')}}><Box size={19}/><span>Artifacts</span></button><button className={active==='upload'?'current':''} aria-current={active==='upload'?'page':undefined} onClick={()=>{setMobile(false);go('/artifacts/new')}}><UploadCloud size={19}/><span>Upload</span></button><button className={route.page==='review-queue'?'current':''} aria-current={route.page==='review-queue'?'page':undefined} onClick={()=>{setMobile(false);go('/review-queue')}}><ShieldAlert size={19}/><span>Reviews</span></button><button className={['governance','policies','audit-trail'].includes(route.page)?'current':''} aria-current={['governance','policies','audit-trail'].includes(route.page)?'page':undefined} onClick={()=>{setMobile(false);go('/governance')}}><Activity size={19}/><span>More</span></button></nav>{notice&&<div className="toast"><Check size={15}/>{notice}<button onClick={()=>setNotice('')}><X size={14}/></button></div>}</div>;}
-export default App;
+import { useEffect, useState } from "react";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import Layout from "./components/common/Layout";
+import { Loading, ErrorState, EmptyState } from "./components/common/Feedback";
+import { DEMO_MODE } from "./config";
+import { sample } from "./data/artifacts";
+import { useResource } from "./hooks/useResource";
+import { artifactUrl, go, readRoute, type Route } from "./routes";
+import {
+  getArtifact,
+  listArtifacts,
+  uploadArtifact,
+  type ArtifactUpload,
+} from "./services/api/artifacts";
+import type { Artifact } from "./types/artifact";
+import LoginPage from "./pages/auth/LoginPage";
+import Dashboard from "./pages/dashboard/Dashboard";
+import ArtifactPage from "./pages/artifacts/ArtifactPage";
+import UploadPage from "./pages/artifacts/UploadPage";
+import DetailPage from "./pages/artifacts/DetailPage";
 
-
-
-
-
-
+function ArtifactRecord({
+  route,
+  items,
+  onRefresh,
+}: {
+  route: Route;
+  items: Artifact[];
+  onRefresh: () => void;
+}) {
+  const [revision, setRevision] = useState(0);
+  const resource = useResource(
+    (signal) =>
+      DEMO_MODE
+        ? Promise.resolve(items.find((x) => x.id === route.id))
+        : getArtifact(route.id!, signal),
+    [route.id, revision],
+  );
+  if (resource.loading) return <Loading>Loading artifact...</Loading>;
+  if (resource.error)
+    return <ErrorState message={resource.error} onRetry={resource.reload} />;
+  if (!resource.data)
+    return (
+      <EmptyState title="Artifact not found">
+        <a href="#/artifacts">Back to artifacts</a>
+      </EmptyState>
+    );
+  return (
+    <DetailPage
+      key={route.id}
+      item={resource.data}
+      tab={route.tab}
+      revision={revision}
+      onRefresh={() => {
+        setRevision((x) => x + 1);
+        onRefresh();
+      }}
+    />
+  );
+}
+function Workspace() {
+  const { user } = useAuth();
+  const [route, setRoute] = useState<Route>(readRoute);
+  const [demoItems, setDemoItems] = useState<Artifact[]>(sample);
+  const [notice, setNotice] = useState("");
+  const [revision, setRevision] = useState(0);
+  const registry = useResource(
+    (signal) =>
+      DEMO_MODE ? Promise.resolve(demoItems) : listArtifacts(signal),
+    [user?.id, revision, demoItems],
+  );
+  useEffect(() => {
+    const change = () => {
+      setRoute(readRoute());
+      window.scrollTo(0, 0);
+    };
+    addEventListener("hashchange", change);
+    return () => removeEventListener("hashchange", change);
+  }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => {
+    if (route.page === "login") go("/dashboard");
+  }, [route.page]);
+  const items = registry.data || [];
+  async function upload(input: ArtifactUpload) {
+    const item = DEMO_MODE
+      ? {
+          id: "DEMO-" + crypto.randomUUID(),
+          name: input.file.name,
+          model: input.modelName,
+          version: input.version,
+          format: input.file.name.split(".").pop()!.toUpperCase(),
+          uploadedBy: user!.name,
+          uploadedAt: new Date().toISOString(),
+          decision: "QUARANTINED" as const,
+          findings: 0,
+          hash: "Pending verification",
+          provenance: { source: input.source },
+        }
+      : await uploadArtifact(input);
+    if (DEMO_MODE) setDemoItems((previous) => [item, ...previous]);
+    else setRevision((x) => x + 1);
+    setNotice(
+      DEMO_MODE
+        ? "Demo quarantine record created. No model bytes were uploaded."
+        : "Upload complete. The model is automatically marked QUARANTINED and hashed. Choose Start scan to generate security evidence.",
+    );
+    go(artifactUrl(item.id));
+  }
+  const registryPage = ["dashboard", "artifacts"].includes(route.page);
+  return (
+    <Layout route={route} count={items.length}>
+      {notice && (
+        <div className="feedback" role="status">
+          {notice}
+          <button className="link-button" onClick={() => setNotice("")}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {registryPage && registry.loading ? (
+        <Loading>Loading artifact registry...</Loading>
+      ) : registryPage && registry.error ? (
+        <ErrorState message={registry.error} onRetry={registry.reload} />
+      ) : (
+        <>
+          {(route.page === "dashboard" || route.page === "login") && (
+            <Dashboard items={items} />
+          )}
+          {route.page === "artifacts" && <ArtifactPage items={items} />}
+        </>
+      )}
+      {route.page === "upload" && <UploadPage onUpload={upload} />}
+      {(route.page === "detail" || route.page === "security") && (
+        <ArtifactRecord
+          key={route.id}
+          route={route}
+          items={items.length ? items : demoItems}
+          onRefresh={() => setRevision((x) => x + 1)}
+        />
+      )}
+      {[
+        "not-found",
+        "review-queue",
+        "governance",
+        "policies",
+        "audit-trail",
+      ].includes(route.page) && (
+        <EmptyState
+          title={
+            route.page === "not-found"
+              ? "Page not found"
+              : "Outside the current module scope"
+          }
+        >
+          <a href="#/artifacts">Back to artifacts</a>
+        </EmptyState>
+      )}
+    </Layout>
+  );
+}
+function Session() {
+  const auth = useAuth();
+  if (auth.loading) return <Loading>Checking your session...</Loading>;
+  if (auth.error)
+    return <ErrorState message={auth.error} onRetry={auth.retry} />;
+  if (!auth.user) return <LoginPage onLogin={auth.signIn} />;
+  return <Workspace key={auth.user.id} />;
+}
+export default function App() {
+  return (
+    <AuthProvider>
+      <Session />
+    </AuthProvider>
+  );
+}

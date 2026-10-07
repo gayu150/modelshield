@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ArrowRight, Clock3, Search, ShieldAlert } from 'lucide-react';
-import type { Artifact } from '../types/artifact';
+import type { Artifact } from '../../types/artifact';
 
 export default function ReviewQueuePage({ items, onOpen }: { items: Artifact[]; onOpen: (id: string) => void }) {
   const [query, setQuery] = useState('');

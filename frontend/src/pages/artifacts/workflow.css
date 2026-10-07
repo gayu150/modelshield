@@ -1,0 +1,18 @@
+.intake-steps {
+  margin: 14px 0 0;
+  padding-left: 20px;
+  color: #e6f3e3;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.quarantine-explanation {
+  margin: 0 0 13px;
+  padding: 12px 15px;
+  border: 1px solid #f0e2c7;
+  border-radius: 10px;
+  background: #fff8e8;
+  color: #5e451d;
+  font-size: 13px;
+  line-height: 1.5;
+}

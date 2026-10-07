@@ -1,4 +1,4 @@
-export type Decision = 'APPROVED' | 'CONDITIONAL' | 'QUARANTINED' | 'BLOCKED';
+export type Decision = "APPROVED" | "CONDITIONAL" | "QUARANTINED" | "BLOCKED";
 export type Artifact = {
   id: string;
   name: string;
@@ -10,4 +10,5 @@ export type Artifact = {
   decision: Decision;
   findings: number;
   hash: string;
+  provenance?: import("./security").Provenance;
 };

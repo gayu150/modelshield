@@ -2,6 +2,12 @@
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
+backend/data/
+backend/.venv/
+backend/.venv-scanner/
+__pycache__/
+*.pyc
 
 # Local environment files
 .env
