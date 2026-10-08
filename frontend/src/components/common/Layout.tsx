@@ -1,12 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  Activity,
   Box,
   ChevronRight,
+  FileKey2,
   Fingerprint,
   LayoutDashboard,
   LogOut,
   Menu,
   Shield,
+  ShieldAlert,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -126,7 +129,7 @@ export default function Layout({
           {route.id && (
             <>
               <small className="nav-label secondary">SECURITY ANALYSIS</small>
-              {(["findings", "evidence", "graph", "provenance"] as const).map(
+              {(["findings", "evidence", "graph", "provenance", "passport"] as const).map(
                 (tab) => (
                   <button
                     key={tab}
@@ -137,12 +140,39 @@ export default function Layout({
                     <Fingerprint size={17} />
                     {tab === "graph"
                       ? "Evidence graph"
+                      : tab === "passport"
+                      ? "Security Passport"
                       : tab[0].toUpperCase() + tab.slice(1)}
                   </button>
                 ),
               )}
             </>
           )}
+          <small className="nav-label secondary">GOVERNANCE</small>
+          <button
+            className={route.page === "review-queue" ? "active" : ""}
+            aria-current={route.page === "review-queue" ? "page" : undefined}
+            onClick={() => go("/review-queue")}
+          >
+            <ShieldAlert size={17} />
+            Review queue
+          </button>
+          <button
+            className={route.page === "policies" ? "active" : ""}
+            aria-current={route.page === "policies" ? "page" : undefined}
+            onClick={() => go("/policies")}
+          >
+            <FileKey2 size={17} />
+            Release policies
+          </button>
+          <button
+            className={route.page === "audit-trail" ? "active" : ""}
+            aria-current={route.page === "audit-trail" ? "page" : undefined}
+            onClick={() => go("/audit-trail")}
+          >
+            <Activity size={17} />
+            Audit trail
+          </button>
         </nav>
         <div className="sidebar-bottom">
           {error && (
@@ -214,9 +244,13 @@ export default function Layout({
           <Box size={20} />
           <span>Artifacts</span>
         </button>
-        <button onClick={() => go("/artifacts/new")}>
-          <UploadCloud size={20} />
-          <span>Upload</span>
+        <button onClick={() => go("/review-queue")}>
+          <ShieldAlert size={20} />
+          <span>Reviews</span>
+        </button>
+        <button onClick={() => go("/governance")}>
+          <Activity size={20} />
+          <span>Governance</span>
         </button>
         <button disabled={busy} onClick={exit}>
           <LogOut size={20} />

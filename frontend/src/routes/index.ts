@@ -1,4 +1,10 @@
-export type SecurityTab = "findings" | "evidence" | "graph" | "provenance";
+export type SecurityTab =
+  | "findings"
+  | "evidence"
+  | "graph"
+  | "provenance"
+  | "passport"
+  | "decision";
 export type Route = {
   page:
     | "dashboard"
@@ -32,7 +38,14 @@ export function parseRoute(hash: string): Route {
     if (parts.length === 2) return { page: "detail", id };
     if (
       parts.length === 3 &&
-      ["findings", "evidence", "graph", "provenance"].includes(tab)
+      [
+        "findings",
+        "evidence",
+        "graph",
+        "provenance",
+        "passport",
+        "decision",
+      ].includes(tab)
     )
       return { page: "security", id, tab: tab as SecurityTab };
     return { page: "not-found" };

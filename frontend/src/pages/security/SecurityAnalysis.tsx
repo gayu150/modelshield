@@ -26,6 +26,8 @@ const labels: Record<SecurityTab, string> = {
   evidence: "Evidence",
   graph: "Evidence graph",
   provenance: "Provenance",
+  passport: "Security Passport",
+  decision: "Governance Decision",
 };
 
 function Findings({
@@ -385,6 +387,14 @@ export default function SecurityAnalysis({
     }
     if (category === "hash" || category === "provenance") {
       go(artifactUrl(artifact.id, "provenance"));
+      return;
+    }
+    if (category === "policy") {
+      go("/policies");
+      return;
+    }
+    if (category === "decision") {
+      go(artifactUrl(artifact.id, "passport"));
       return;
     }
     setGraphNotice(

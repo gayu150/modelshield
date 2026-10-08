@@ -1,0 +1,543 @@
+/* ModelShield Member 3: Governance, Policies, Decision & Passport styles */
+
+.governance-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.governance-tabs {
+  display: flex;
+  gap: 8px;
+  background: #eef2f6;
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.gov-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #556579;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.18s ease;
+}
+
+.gov-tab-btn:hover {
+  color: #172536;
+}
+
+.gov-tab-btn.active {
+  background: #ffffff;
+  color: #172536;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.policy-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.policy-card-full {
+  background: #ffffff;
+  border: 1px solid #e1e7ef;
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 3px 12px rgba(20, 34, 53, 0.03);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.policy-card-full:hover {
+  border-color: #cbd7e6;
+  transform: translateY(-2px);
+}
+
+.policy-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.policy-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.policy-tag.active {
+  background: #eaf7f0;
+  color: #12825d;
+}
+
+.policy-tag.draft {
+  background: #fff6e5;
+  color: #b77908;
+}
+
+.policy-tag.deprecated {
+  background: #fdecec;
+  color: #dc2626;
+}
+
+.policy-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #142235;
+  margin: 4px 0 2px;
+}
+
+.policy-code-badge {
+  font-size: 11px;
+  font-family: monospace;
+  color: #627284;
+}
+
+.policy-card-desc {
+  font-size: 13px;
+  color: #556579;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.rules-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid #edf0f5;
+  padding-top: 14px;
+}
+
+.rule-row-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e9edf3;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.rule-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rule-left b {
+  color: #243447;
+}
+
+.rule-left small {
+  color: #728294;
+  font-size: 11px;
+}
+
+.rule-action-badge {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.rule-action-badge.block {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.rule-action-badge.warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.rule-action-badge.allow {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+/* Audit Trail View */
+.audit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.audit-timeline {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border-left: 2px solid #e5eaf0;
+  margin-left: 14px;
+  padding-left: 20px;
+  gap: 18px;
+}
+
+.audit-item {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid #e5eaf0;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.audit-node-dot {
+  position: absolute;
+  left: -29px;
+  top: 16px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 2px #d1dbe7;
+}
+
+.audit-node-dot.success { background: #10b981; }
+.audit-node-dot.warning { background: #f59e0b; }
+.audit-node-dot.failure { background: #ef4444; }
+
+.audit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.audit-type-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #334155;
+  letter-spacing: 0.5px;
+}
+
+.audit-time {
+  font-size: 11px;
+  color: #8b9aa9;
+}
+
+.audit-desc {
+  font-size: 13px;
+  font-weight: 600;
+  color: #172536;
+  margin-bottom: 8px;
+}
+
+.audit-actor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #556579;
+}
+
+.audit-actor-row b {
+  color: #172536;
+}
+
+.audit-details-box {
+  margin-top: 10px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #475569;
+  word-break: break-all;
+}
+
+/* Modal styles for DecisionMaker */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal-dialog {
+  background: #ffffff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 620px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.modal-head h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #142235;
+  margin: 0;
+}
+
+.modal-content {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.decision-options-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.decision-radio-card {
+  border: 2px solid #e5eaf0;
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.decision-radio-card:hover {
+  border-color: #cbd5e1;
+}
+
+.decision-radio-card.selected {
+  border-color: #2563eb;
+  background: #f0f7ff;
+}
+
+.decision-radio-card.approved.selected {
+  border-color: #10b981;
+  background: #ecfdf5;
+}
+
+.decision-radio-card.conditional.selected {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.decision-radio-card.blocked.selected {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.decision-radio-card b {
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.decision-radio-card span {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.policy-compliance-preview {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compliance-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.compliance-status-banner.pass {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.compliance-status-banner.conditional {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.compliance-status-banner.block {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid #edf0f5;
+  background: #fbfcfe;
+  border-radius: 0 0 16px 16px;
+}
+
+/* Security Passport styling */
+.passport-container {
+  background: #ffffff;
+  border: 2px solid #142235;
+  border-radius: 16px;
+  box-shadow: 0 12px 35px rgba(20, 34, 53, 0.08);
+  overflow: hidden;
+  margin: 16px 0;
+}
+
+.passport-topbar {
+  background: linear-gradient(135deg, #142235, #1e3350);
+  color: #ffffff;
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.passport-brand-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.passport-shield-icon {
+  width: 44px;
+  height: 44px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #60a5fa;
+}
+
+.passport-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  padding: 24px;
+  border-bottom: 1px solid #e5eaf0;
+  background: #fafcff;
+}
+
+.passport-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.passport-field label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #75869a;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.passport-field span {
+  font-size: 13px;
+  font-weight: 600;
+  color: #172536;
+}
+
+.passport-sections {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.passport-section-card {
+  border: 1px solid #e5eaf0;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.passport-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #142235;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.passport-seal-footer {
+  padding: 20px 24px;
+  background: #f8fafc;
+  border-top: 1px solid #e5eaf0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.seal-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.seal-info b {
+  color: #1e293b;
+  font-family: monospace;
+}
+
+@media print {
+  .sidebar, .topbar, .back-link, .btn, .governance-tabs {
+    display: none !important;
+  }
+  .passport-container {
+    border: 1px solid #000;
+    box-shadow: none;
+    margin: 0;
+  }
+}

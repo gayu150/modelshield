@@ -7,6 +7,15 @@ import type {
   Provenance,
   RiskSummary,
 } from "../types/security";
+import type {
+  AuditEntry,
+  DecisionRecord,
+  PolicyEvaluation,
+  PolicyRule,
+  ReleasePolicy,
+  RuleEvaluation,
+  SecurityPassport,
+} from "../types/governance";
 
 export function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -214,3 +223,191 @@ export function parseScan(value: unknown): Scan {
   if (v.error != null) result.error = text(v.error);
   return result;
 }
+
+export function parsePolicyRule(value: unknown): PolicyRule {
+  const v = record(value);
+  return {
+    id: identifier(v.id),
+    code: text(v.code),
+    title: text(v.title),
+    description: text(v.description),
+    trigger: enumValue(v.trigger, [
+      "CRITICAL",
+      "HIGH",
+      "MEDIUM",
+      "ANY_FINDING",
+      "HASH_MISMATCH",
+      "UNVERIFIED_PROVENANCE",
+      "UNVERIFIED_SIGNATURE",
+    ]),
+    action: enumValue(v.action, ["BLOCK", "WARN", "ALLOW"]),
+    enabled: typeof v.enabled === "boolean" ? v.enabled : true,
+  };
+}
+
+export function parsePolicy(value: unknown): ReleasePolicy {
+  const v = record(value);
+  return {
+    id: identifier(v.id),
+    code: text(v.code),
+    name: text(v.name),
+    version: text(v.version),
+    description: text(v.description),
+    status: enumValue(v.status, ["ACTIVE", "DRAFT", "DEPRECATED"]),
+    rules: array(v.rules, parsePolicyRule),
+    targetFormats: array(v.targetFormats, text),
+    updatedAt: text(v.updatedAt),
+  };
+}
+
+export const parsePolicies = (value: unknown) =>
+  identifiers(array(value, parsePolicy));
+
+export function parseRuleEvaluation(value: unknown): RuleEvaluation {
+  const v = record(value);
+  return {
+    ruleCode: text(v.ruleCode),
+    ruleTitle: text(v.ruleTitle),
+    passed: Boolean(v.passed),
+    action: enumValue(v.action, ["BLOCK", "WARN", "ALLOW"]),
+    reason: text(v.reason),
+  };
+}
+
+export function parsePolicyEvaluation(value: unknown): PolicyEvaluation {
+  const v = record(value);
+  return {
+    policyId: identifier(v.policyId),
+    policyCode: text(v.policyCode),
+    policyName: text(v.policyName),
+    policyVersion: text(v.policyVersion),
+    overallOutcome: enumValue(v.overallOutcome, [
+      "PASS",
+      "CONDITIONAL",
+      "BLOCK",
+    ]),
+    ruleEvaluations: array(v.ruleEvaluations, parseRuleEvaluation),
+    evaluatedAt: text(v.evaluatedAt),
+  };
+}
+
+export function parseDecisionRecord(value: unknown): DecisionRecord {
+  const v = record(value);
+  const result: DecisionRecord = {
+    id: identifier(v.id),
+    artifactId: identifier(v.artifactId),
+    decision: enumValue(v.decision, [
+      "APPROVED",
+      "CONDITIONAL",
+      "QUARANTINED",
+      "BLOCKED",
+    ]),
+    rationale: text(v.rationale),
+    reviewerId: identifier(v.reviewerId),
+    reviewerName: text(v.reviewerName),
+    reviewerRole: text(v.reviewerRole),
+    createdAt: text(v.createdAt),
+  };
+  if (v.conditions != null) result.conditions = array(v.conditions, text);
+  if (v.validUntil != null) result.validUntil = text(v.validUntil);
+  if (v.signature != null) result.signature = text(v.signature);
+  return result;
+}
+
+export const parseDecisionRecords = (value: unknown) =>
+  identifiers(array(value, parseDecisionRecord));
+
+export function parseSecurityPassport(value: unknown): SecurityPassport {
+  const v = record(value);
+  const art = record(v.artifact);
+  const integ = record(v.integrity);
+  const prov = record(v.provenance);
+  const scan = record(v.scanSummary);
+  const seal = record(v.verificationSeal);
+
+  return {
+    passportId: identifier(v.passportId),
+    passportNumber: text(v.passportNumber),
+    issuedAt: text(v.issuedAt),
+    status: enumValue(v.status, ["VALID", "REVOKED", "EXPIRED"]),
+    artifact: {
+      id: identifier(art.id),
+      name: text(art.name),
+      model: text(art.model),
+      version: text(art.version),
+      format: text(art.format),
+      sha256: text(art.sha256),
+      uploadedBy: text(art.uploadedBy),
+      uploadedAt: text(art.uploadedAt),
+    },
+    integrity: {
+      hashMatches: Boolean(integ.hashMatches),
+      observedHash: text(integ.observedHash),
+      expectedHash: text(integ.expectedHash),
+    },
+    provenance: {
+      source: prov.source != null ? text(prov.source) : undefined,
+      publisher: prov.publisher != null ? text(prov.publisher) : undefined,
+      repository: prov.repository != null ? text(prov.repository) : undefined,
+      revision: prov.revision != null ? text(prov.revision) : undefined,
+      origin: prov.origin != null ? text(prov.origin) : undefined,
+      verificationStatus: text(prov.verificationStatus),
+    },
+    scanSummary: {
+      scanner: text(scan.scanner),
+      scannedAt: scan.scannedAt != null ? text(scan.scannedAt) : undefined,
+      totalFindings: Number(scan.totalFindings) || 0,
+      criticalCount: Number(scan.criticalCount) || 0,
+      highCount: Number(scan.highCount) || 0,
+      mediumCount: Number(scan.mediumCount) || 0,
+      lowCount: Number(scan.lowCount) || 0,
+    },
+    policyEvaluation: parsePolicyEvaluation(v.policyEvaluation),
+    decision: parseDecisionRecord(v.decision),
+    verificationSeal: {
+      algorithm: text(seal.algorithm),
+      signature: text(seal.signature),
+      issuer: text(seal.issuer),
+    },
+  };
+}
+
+export function parseAuditEntry(value: unknown): AuditEntry {
+  const v = record(value);
+  const actor = record(v.actor);
+  const timestamp = text(v.timestamp);
+  if (!Number.isFinite(Date.parse(timestamp))) {
+    throw new Error("Invalid audit timestamp.");
+  }
+  const result: AuditEntry = {
+    id: identifier(v.id),
+    timestamp,
+    eventType: enumValue(v.eventType, [
+      "ARTIFACT_UPLOAD",
+      "SCAN_STARTED",
+      "SCAN_COMPLETED",
+      "POLICY_EVALUATION",
+      "DECISION_RECORDED",
+      "PASSPORT_GENERATED",
+      "USER_LOGIN",
+      "USER_LOGOUT",
+    ]),
+    actor: {
+      id: identifier(actor.id),
+      name: text(actor.name),
+      role: text(actor.role),
+    },
+    description: text(v.description),
+    status: enumValue(v.status, ["SUCCESS", "WARNING", "FAILURE"]),
+  };
+  if (v.targetId != null) result.targetId = text(v.targetId);
+  if (v.targetName != null) result.targetName = text(v.targetName);
+  if (v.details != null && typeof v.details === "object") {
+    result.details = v.details as Record<string, unknown>;
+  }
+  return result;
+}
+
+export const parseAuditTrail = (value: unknown) =>
+  identifiers(array(value, parseAuditEntry));
+

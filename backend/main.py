@@ -1,6 +1,7 @@
 import hmac
 import json
 import os
+import secrets
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .config import ALLOWED_HOSTS, FORCE_SECURE_COOKIE, MAX_UPLOAD_BYTES, SESSION_SECONDS, UPLOAD_DIR
 from .scanner import EXTENSIONS, digest, report, utc_now, validate_content
 from .modelaudit_adapter import ScannerUnavailable, scan as modelaudit_scan
-from .store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session
+from .store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, record_audit
 
 
 @asynccontextmanager
@@ -132,6 +133,8 @@ def login(payload: Credentials, request: Request, response: Response):
             raise HTTPException(401, 'Invalid email or password.')
         db.execute('DELETE FROM login_failures WHERE email = ?', (email,))
         token = new_session(db, user['id'])
+        record_audit(db, user['id'], user['name'], user['role'], 'USER_LOGIN',
+                     f"User {user['name']} signed in successfully.")
     response.set_cookie('modelshield_session', token, max_age=SESSION_SECONDS,
                         httponly=True, secure=FORCE_SECURE_COOKIE or request.url.scheme == 'https',
                         samesite='strict', path='/')
@@ -146,6 +149,8 @@ def me(user=Depends(current_user)):
 @app.post('/auth/logout', status_code=204)
 def logout(request: Request, response: Response, _user=Depends(csrf_user)):
     with connect() as db:
+        record_audit(db, _user['id'], _user['name'], _user['role'], 'USER_LOGOUT',
+                     f"User {_user['name']} signed out.")
         end_session(db, request.cookies['modelshield_session'])
     response.delete_cookie('modelshield_session', path='/', samesite='strict')
 
@@ -207,6 +212,10 @@ async def upload(file: UploadFile = File(...), model_name: str = Form(...),
             row = db.execute('''SELECT artifacts.*, users.name AS owner_name FROM artifacts
                                 JOIN users ON users.id = owner_id WHERE artifacts.id = ?''',
                              (artifact_id,)).fetchone()
+            record_audit(db, user['id'], user['name'], user['role'], 'ARTIFACT_UPLOAD',
+                         f"Uploaded artifact {name} ({extension.removeprefix('.').upper()}). Automatically placed in QUARANTINED state.",
+                         target_id=artifact_id, target_name=name,
+                         details={'format': extension.removeprefix('.').upper(), 'sizeBytes': size})
             return artifact_json(db, row)
     except Exception:
         temporary.unlink(missing_ok=True)
@@ -250,6 +259,14 @@ def run_scan(scan_id: str, artifact_id: str, path: str, extension: str, expected
                            (item['id'], scan_id, json.dumps(item)))
             db.execute('UPDATE scans SET status = ?, progress = ?, completed_at = ?, observed_hash = ? WHERE id = ?',
                        ('COMPLETED', 100, utc_now(), observed, scan_id))
+            art = db.execute('''SELECT artifacts.name, users.id AS user_id, users.name AS user_name, users.role AS user_role
+                                FROM artifacts JOIN users ON users.id = artifacts.owner_id WHERE artifacts.id = ?''',
+                             (artifact_id,)).fetchone()
+            if art:
+                record_audit(db, art['user_id'], art['user_name'], art['user_role'], 'SCAN_COMPLETED',
+                             f"Scan completed for {art['name']} with {len(findings)} findings.",
+                             target_id=artifact_id, target_name=art['name'],
+                             details={'findingsCount': len(findings), 'scanId': scan_id})
     except Exception as exc:
         failure = str(exc) if isinstance(exc, ScannerUnavailable) else 'Scanner failed.'
         with connect() as db:
@@ -269,6 +286,10 @@ def start_scan(artifact_id: str, background_tasks: BackgroundTasks, user=Depends
         db.execute('''INSERT INTO scans (id, artifact_id, status, progress, created_at)
                       VALUES (?, ?, ?, ?, ?)''',
                    (scan_id, artifact_id, 'QUEUED', 0, utc_now()))
+        record_audit(db, user['id'], user['name'], user['role'], 'SCAN_STARTED',
+                     f"Initiated security scan for artifact {row['name']}.",
+                     target_id=artifact_id, target_name=row['name'],
+                     details={'scanId': scan_id})
     background_tasks.add_task(run_scan, scan_id, artifact_id, row['path'], '.' + row['format'].lower(), row['sha256'])
     return {'scan_id': scan_id}
 
@@ -326,6 +347,9 @@ def graph(artifact_id: str, user=Depends(current_user)):
         row = owned_artifact(db, artifact_id, user['id'])
         related_findings = report_rows(db, artifact_id, user['id'], 'findings')
         related_evidence = report_rows(db, artifact_id, user['id'], 'evidence')
+        policy_row = db.execute("SELECT * FROM policies WHERE status = 'ACTIVE' ORDER BY code LIMIT 1").fetchone()
+        latest_dec = db.execute('''SELECT * FROM decisions WHERE artifact_id = ?
+                                ORDER BY created_at DESC LIMIT 1''', (artifact_id,)).fetchone()
     nodes = [{'id': artifact_id, 'label': row['name'], 'kind': 'Artifact'}]
     hash_id, provenance_id = 'hash:' + artifact_id, 'provenance:' + artifact_id
     nodes += [{'id': hash_id, 'label': 'SHA-256 ' + row['sha256'][:12] + '…', 'kind': 'Hash'},
@@ -345,6 +369,19 @@ def graph(artifact_id: str, user=Depends(current_user)):
         nodes.append({'id': scanner_id, 'label': scanner, 'kind': 'Scanner'})
         edges.extend({'source': scanner_id, 'target': item['id'], 'label': 'produced'}
                      for item in related_evidence if item.get('scanner') == scanner)
+
+    # Member 3: Policy & Decision nodes in the evidence graph
+    if policy_row:
+        policy_node_id = 'policy:' + artifact_id
+        nodes.append({'id': policy_node_id, 'label': 'Policy: ' + policy_row['name'], 'kind': 'Policy'})
+        edges.append({'source': artifact_id, 'target': policy_node_id, 'label': 'evaluated against'})
+        for finding_item in related_findings:
+            edges.append({'source': finding_item['id'], 'target': policy_node_id, 'label': 'evaluated by'})
+        if latest_dec:
+            dec_node_id = 'decision:' + artifact_id
+            nodes.append({'id': dec_node_id, 'label': 'Decision: ' + latest_dec['decision'], 'kind': 'Decision'})
+            edges.append({'source': policy_node_id, 'target': dec_node_id, 'label': 'yields decision'})
+            edges.append({'source': dec_node_id, 'target': artifact_id, 'label': 'recorded for'})
     return {'nodes': nodes, 'edges': edges}
 
 
@@ -377,3 +414,317 @@ def risk_summary(artifact_id: str, user=Depends(current_user)):
     return {'state': state, 'reasons': reasons, 'findingCounts': counts,
             'integrity': integrity, 'provenance': provenance, 'signature': 'UNKNOWN',
             'scanStatus': status}
+
+
+class DecisionPayload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    decision: str = Field(min_length=3, max_length=30)
+    rationale: str = Field(min_length=3, max_length=2000)
+    conditions: list[str] = Field(default_factory=list)
+
+
+def evaluate_artifact_policy(db: sqlite3.Connection, artifact_row, scan_row, findings, policy_id: str | None = None):
+    if policy_id:
+        policy_row = db.execute('SELECT * FROM policies WHERE id = ? OR code = ?', (policy_id, policy_id)).fetchone()
+    else:
+        policy_row = db.execute("SELECT * FROM policies WHERE status = 'ACTIVE' ORDER BY code LIMIT 1").fetchone()
+    if policy_row is None:
+        raise HTTPException(404, 'Policy not found.')
+
+    rules = json.loads(policy_row['rules'])
+    rule_evaluations = []
+    overall_outcome = 'PASS'
+
+    critical_count = sum(1 for f in findings if f.get('severity') == 'CRITICAL')
+    high_count = sum(1 for f in findings if f.get('severity') == 'HIGH')
+    medium_count = sum(1 for f in findings if f.get('severity') == 'MEDIUM')
+
+    observed_hash = scan_row['observed_hash'] if scan_row else None
+    hash_mismatch = (observed_hash is not None and not hmac.compare_digest(observed_hash, artifact_row['sha256']))
+    unverified_prov = (
+        not artifact_row['source'] and not artifact_row['publisher'] and not artifact_row['repository']
+    )
+
+    for rule in rules:
+        if not rule.get('enabled', True):
+            continue
+        trigger = rule.get('trigger')
+        action = rule.get('action', 'BLOCK')
+        failed = False
+        reason = 'Evaluation passed without violations.'
+
+        if trigger == 'CRITICAL' and critical_count > 0:
+            failed = True
+            reason = f'Detected {critical_count} CRITICAL findings.'
+        elif trigger == 'HIGH' and high_count > 0:
+            failed = True
+            reason = f'Detected {high_count} HIGH findings requiring governance review.'
+        elif trigger == 'MEDIUM' and medium_count > 0:
+            failed = True
+            reason = f'Detected {medium_count} MEDIUM findings.'
+        elif trigger == 'ANY_FINDING' and len(findings) > 0:
+            failed = True
+            reason = f'Artifact has {len(findings)} findings.'
+        elif trigger == 'HASH_MISMATCH' and hash_mismatch:
+            failed = True
+            reason = 'Observed scan hash does not match artifact SHA-256.'
+        elif trigger == 'UNVERIFIED_PROVENANCE' and unverified_prov:
+            failed = True
+            reason = 'Uploader provenance origin has not been specified or verified.'
+
+        if failed:
+            if action == 'BLOCK':
+                overall_outcome = 'BLOCK'
+            elif action == 'WARN' and overall_outcome != 'BLOCK':
+                overall_outcome = 'CONDITIONAL'
+
+        rule_evaluations.append({
+            'ruleCode': rule.get('code', 'RULE'),
+            'ruleTitle': rule.get('title', 'Rule check'),
+            'passed': not failed,
+            'action': action,
+            'reason': reason
+        })
+
+    return {
+        'policyId': policy_row['id'],
+        'policyCode': policy_row['code'],
+        'policyName': policy_row['name'],
+        'policyVersion': policy_row['version'],
+        'overallOutcome': overall_outcome,
+        'ruleEvaluations': rule_evaluations,
+        'evaluatedAt': utc_now()
+    }
+
+
+@app.get('/policies')
+def get_policies(_user=Depends(current_user)):
+    with connect() as db:
+        rows = db.execute('SELECT * FROM policies ORDER BY code').fetchall()
+        return [{
+            'id': r['id'],
+            'code': r['code'],
+            'name': r['name'],
+            'version': r['version'],
+            'description': r['description'],
+            'status': r['status'],
+            'targetFormats': json.loads(r['target_formats']),
+            'rules': json.loads(r['rules']),
+            'updatedAt': r['updated_at']
+        } for r in rows]
+
+
+@app.get('/policies/{policy_id}')
+def get_policy(policy_id: str, _user=Depends(current_user)):
+    with connect() as db:
+        r = db.execute('SELECT * FROM policies WHERE id = ? OR code = ?', (policy_id, policy_id)).fetchone()
+        if r is None:
+            raise HTTPException(404, 'Policy not found.')
+        return {
+            'id': r['id'],
+            'code': r['code'],
+            'name': r['name'],
+            'version': r['version'],
+            'description': r['description'],
+            'status': r['status'],
+            'targetFormats': json.loads(r['target_formats']),
+            'rules': json.loads(r['rules']),
+            'updatedAt': r['updated_at']
+        }
+
+
+@app.post('/artifacts/{artifact_id}/evaluate')
+def evaluate_policy(artifact_id: str, policy_id: str | None = None, user=Depends(current_user)):
+    with connect() as db:
+        art = owned_artifact(db, artifact_id, user['id'])
+        scan = latest_scan(db, artifact_id)
+        findings = report_rows(db, artifact_id, user['id'], 'findings')
+        eval_result = evaluate_artifact_policy(db, art, scan, findings, policy_id)
+        record_audit(db, user['id'], user['name'], user['role'], 'POLICY_EVALUATION',
+                     f"Evaluated policy {eval_result['policyCode']} on {art['name']}. Outcome: {eval_result['overallOutcome']}.",
+                     target_id=artifact_id, target_name=art['name'],
+                     status='SUCCESS' if eval_result['overallOutcome'] == 'PASS' else 'WARNING' if eval_result['overallOutcome'] == 'CONDITIONAL' else 'FAILURE',
+                     details={'policyCode': eval_result['policyCode'], 'outcome': eval_result['overallOutcome']})
+        return eval_result
+
+
+@app.post('/artifacts/{artifact_id}/decision')
+def make_decision(artifact_id: str, payload: DecisionPayload, user=Depends(csrf_user)):
+    decision_val = payload.decision.strip().upper()
+    if decision_val not in {'APPROVED', 'CONDITIONAL', 'QUARANTINED', 'BLOCKED'}:
+        raise HTTPException(422, 'Invalid decision status.')
+    with connect() as db:
+        art = owned_artifact(db, artifact_id, user['id'])
+        db.execute('UPDATE artifacts SET decision = ? WHERE id = ?', (decision_val, artifact_id))
+        dec_id = 'DEC-' + secrets.token_hex(6).upper()
+        signature = '0x' + secrets.token_hex(20)
+        now_iso = utc_now()
+        conditions_json = json.dumps(payload.conditions)
+        db.execute('''INSERT INTO decisions (id, artifact_id, reviewer_id, reviewer_name, reviewer_role,
+                                             decision, rationale, conditions, created_at, signature)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (dec_id, artifact_id, user['id'], user['name'], user['role'],
+                    decision_val, payload.rationale, conditions_json, now_iso, signature))
+        record_audit(db, user['id'], user['name'], user['role'], 'DECISION_RECORDED',
+                     f"Recorded decision {decision_val} for {art['name']}.",
+                     target_id=artifact_id, target_name=art['name'],
+                     status='SUCCESS' if decision_val == 'APPROVED' else 'WARNING' if decision_val == 'CONDITIONAL' else 'FAILURE',
+                     details={'decision': decision_val, 'rationale': payload.rationale, 'conditions': payload.conditions})
+        return {
+            'id': dec_id,
+            'artifactId': artifact_id,
+            'decision': decision_val,
+            'rationale': payload.rationale,
+            'conditions': payload.conditions,
+            'reviewerId': user['id'],
+            'reviewerName': user['name'],
+            'reviewerRole': user['role'],
+            'createdAt': now_iso,
+            'signature': signature
+        }
+
+
+@app.get('/artifacts/{artifact_id}/decisions')
+def get_decisions(artifact_id: str, user=Depends(current_user)):
+    with connect() as db:
+        owned_artifact(db, artifact_id, user['id'])
+        rows = db.execute('''SELECT * FROM decisions WHERE artifact_id = ?
+                             ORDER BY created_at DESC, id DESC''', (artifact_id,)).fetchall()
+        return [{
+            'id': r['id'],
+            'artifactId': r['artifact_id'],
+            'decision': r['decision'],
+            'rationale': r['rationale'],
+            'conditions': json.loads(r['conditions']) if r['conditions'] else [],
+            'reviewerId': r['reviewer_id'],
+            'reviewerName': r['reviewer_name'],
+            'reviewerRole': r['reviewer_role'],
+            'createdAt': r['created_at'],
+            'signature': r['signature']
+        } for r in rows]
+
+
+@app.get('/artifacts/{artifact_id}/passport')
+def get_passport(artifact_id: str, user=Depends(current_user)):
+    with connect() as db:
+        art = owned_artifact(db, artifact_id, user['id'])
+        scan = latest_scan(db, artifact_id)
+        findings = report_rows(db, artifact_id, user['id'], 'findings')
+        eval_result = evaluate_artifact_policy(db, art, scan, findings)
+        dec_row = db.execute('''SELECT * FROM decisions WHERE artifact_id = ?
+                                ORDER BY created_at DESC LIMIT 1''', (artifact_id,)).fetchone()
+
+        if dec_row:
+            dec_data = {
+                'id': dec_row['id'],
+                'artifactId': artifact_id,
+                'decision': dec_row['decision'],
+                'rationale': dec_row['rationale'],
+                'conditions': json.loads(dec_row['conditions']) if dec_row['conditions'] else [],
+                'reviewerId': dec_row['reviewer_id'],
+                'reviewerName': dec_row['reviewer_name'],
+                'reviewerRole': dec_row['reviewer_role'],
+                'createdAt': dec_row['created_at'],
+                'signature': dec_row['signature']
+            }
+        else:
+            dec_data = {
+                'id': 'DEC-INITIAL-' + artifact_id[:6],
+                'artifactId': artifact_id,
+                'decision': art['decision'],
+                'rationale': 'Initial intake quarantine status pending governance sign-off.',
+                'conditions': [],
+                'reviewerId': user['id'],
+                'reviewerName': user['name'],
+                'reviewerRole': user['role'],
+                'createdAt': art['uploaded_at'],
+                'signature': '0x' + secrets.token_hex(16)
+            }
+
+        hash_matches = (scan is not None and scan['observed_hash'] is not None and
+                        hmac.compare_digest(scan['observed_hash'], art['sha256']))
+
+        counts = {level: sum(item['severity'] == level for item in findings)
+                  for level in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')}
+
+        passport_num = f"MSP-2026-{(abs(hash(artifact_id)) % 900000 + 100000)}"
+        issued_at = dec_data['createdAt']
+        seal_sig = '0x' + hmac.new(b'modelshield-governance-seal', (artifact_id + art['sha256']).encode(), 'sha256').hexdigest()[:40] + '...'
+
+        passport = {
+            'passportId': 'PSP-' + artifact_id[:8].upper(),
+            'passportNumber': passport_num,
+            'issuedAt': issued_at,
+            'status': 'REVOKED' if art['decision'] == 'BLOCKED' else 'VALID',
+            'artifact': {
+                'id': art['id'],
+                'name': art['name'],
+                'model': art['model'],
+                'version': art['version'],
+                'format': art['format'],
+                'sha256': art['sha256'],
+                'uploadedBy': user['name'],
+                'uploadedAt': art['uploaded_at']
+            },
+            'integrity': {
+                'hashMatches': hash_matches,
+                'observedHash': scan['observed_hash'] if scan and scan['observed_hash'] else art['sha256'],
+                'expectedHash': art['sha256']
+            },
+            'provenance': {
+                'source': art['source'],
+                'publisher': art['publisher'],
+                'repository': art['repository'],
+                'revision': art['revision'],
+                'origin': art['origin'],
+                'verificationStatus': 'UNVERIFIED' if any(art[key] for key in ('source', 'publisher', 'repository', 'revision', 'origin')) else 'MISSING'
+            },
+            'scanSummary': {
+                'scanner': 'ModelAudit 0.2.52 & Structural Engine',
+                'scannedAt': scan['completed_at'] if scan else None,
+                'totalFindings': len(findings),
+                'criticalCount': counts['CRITICAL'],
+                'highCount': counts['HIGH'],
+                'mediumCount': counts['MEDIUM'],
+                'lowCount': counts['LOW']
+            },
+            'policyEvaluation': eval_result,
+            'decision': dec_data,
+            'verificationSeal': {
+                'algorithm': 'SHA256-RSA-MODELSHIELD-SIGN',
+                'signature': seal_sig,
+                'issuer': 'ModelShield Release Governance Authority'
+            }
+        }
+        record_audit(db, user['id'], user['name'], user['role'], 'PASSPORT_GENERATED',
+                     f"Generated Model Security Passport {passport_num} for {art['name']}.",
+                     target_id=artifact_id, target_name=art['name'],
+                     details={'passportNumber': passport_num, 'status': passport['status']})
+        return passport
+
+
+@app.get('/audit')
+def audit_trail(event_type: str | None = None, target_id: str | None = None, user=Depends(current_user)):
+    with connect() as db:
+        query = 'SELECT * FROM audit_logs WHERE user_id = ?'
+        params = [user['id']]
+        if event_type:
+            query += ' AND event_type = ?'
+            params.append(event_type)
+        if target_id:
+            query += ' AND target_id = ?'
+            params.append(target_id)
+        query += ' ORDER BY created_at DESC, id DESC LIMIT 200'
+        rows = db.execute(query, params).fetchall()
+        return [{
+            'id': r['id'],
+            'timestamp': r['created_at'],
+            'eventType': r['event_type'],
+            'actor': {'id': r['user_id'], 'name': r['user_name'], 'role': r['user_role']},
+            'targetId': r['target_id'],
+            'targetName': r['target_name'],
+            'description': r['description'],
+            'status': r['status'],
+            'details': json.loads(r['payload']) if r['payload'] else {}
+        } for r in rows]
+

@@ -1,10 +1,10 @@
-﻿# ModelShield
+# ModelShield
 
-ModelShield includes the Member 1 artifact workflow and Member 2 security analysis. The React frontend connects to a FastAPI backend with SQLite records and local upload storage. Member 3 governance work is outside this implementation.
+ModelShield provides an end-to-end evidence-based security release governance platform for ML model artifacts. It connects Member 1 (artifact intake & fingerprinting), Member 2 (security scanning & evidence graph), and Member 3 (release policies, review queue, decision engine, model security passport, and tamper-evident audit trail).
 
 ## Run locally
 
-Use Python 3.13 and Node 22.13 or newer. From the repository root:
+Use Python 3.10+ and Node 20+ (Node 22.13 recommended). From the repository root:
 
 ```powershell
 python -m pip install -r backend/requirements.txt
@@ -24,27 +24,34 @@ npm ci
 npm run dev
 ```
 
-Vite listens on 127.0.0.1 and proxies /api to the backend on 127.0.0.1:8000. Set VITE_USE_MOCK_DATA=true only for the clearly labeled interface demo; demo uploads never transmit file bytes or run scans. Set MODELSHIELD_DATA_DIR to move the ignored backend/data directory. Production deployment needs an HTTPS reverse proxy, MODELSHIELD_SECURE_COOKIE=true and MODELSHIELD_ALLOWED_HOSTS for its actual host.
-
-If port 8000 is occupied, start Uvicorn on another port (for example 8010) and set `VITE_DEV_API_TARGET=http://127.0.0.1:8010` in `frontend/.env.local` before starting Vite.
+Vite listens on 127.0.0.1 and proxies /api to the backend on 127.0.0.1:8000. Set VITE_USE_MOCK_DATA=true for the fully interactive standalone client-side demo mode. Set MODELSHIELD_DATA_DIR to move the ignored backend/data directory.
 
 ## What works
 
-Member 1: cookie session login and logout, registry statistics, artifact search/filter/pagination, validated upload, SHA-256 fingerprint, artifact detail and scan polling. Member 2: scanner findings, evidence timeline, graph, provenance and risk summary. The backend scopes artifacts and every related report to the uploading user. Authenticated mutations require the CSRF token from GET /auth/me. The frontend validates API payloads before rendering them.
+- **Member 1 (Intake & Registry)**: Session login/logout, registry statistics, artifact search/filter/pagination, validated upload, SHA-256 fingerprinting, artifact detail, and scan control.
+- **Member 2 (Security & Evidence)**: Static and ModelAudit 0.2.52 scanner findings, evidence timeline, provenance claims, and risk summary.
+- **Member 3 (Governance & Decisions)**:
+  - **Review Queue**: Triage workstation for quarantined and conditional models with filters and quick actions.
+  - **Release Policies**: Active policy catalog (e.g. `PROD-SEC-004`, `DEV-SANDBOX-001`, `FIN-COMPLY-009`) with automated rule evaluation against scanner findings and cryptographic hash integrity.
+  - **Decision Engine**: Reviewer sign-off dialog to record decisions (`APPROVED`, `CONDITIONAL`, `QUARANTINED`, `BLOCKED`) with required rationale, operational conditions, and CSRF protection.
+  - **Model Security Passport**: Official verifiable attestation certificate with JSON export and print views.
+  - **Audit Trail**: Immutable chronological activity stream tracking logins, uploads, scans, policy checks, decisions, and passport generation.
+  - **Evidence Graph**: Linked Policy and Decision nodes connecting directly to the artifact and scanner evidence graph.
 
-Uploads remain QUARANTINED. The built-in structural scanner reads bytes without loading a model. ModelAudit 0.2.52 runs as a separate local process on a read-only copy and its JSON issues are normalized into findings and evidence. Missing scanner, timeout, malformed report or scanner error marks the scan FAILED. Neither scanner approves models or verifies publisher signatures. Other decision statuses remain frontend data contract values for the future governance module.
+## Integrated Pipeline Flow
 
-## Upload and scan flow
+$$\text{Upload (M1)} \to \text{Artifact (M1)} \to \text{Scan (M1)} \to \text{Findings (M2)} \to \text{Evidence (M2)} \to \mathbf{\text{Policy (M3)}} \to \mathbf{\text{Decision (M3)}} \to \mathbf{\text{Passport (M3)}} \to \mathbf{\text{Audit (M3)}}$$
 
-1. Upload a supported ML model file. The backend validates it, saves it under its local upload directory, records its SHA-256, and sets status to QUARANTINED automatically.
-2. On the artifact page, choose Start scan. This is a separate action; there is no manual quarantine button.
-3. When the scan completes, review Findings, Evidence, Evidence graph, and Provenance. Scanning does not change the QUARANTINED status.
+1. Upload supported ML model (.onnx, .pkl, .pt, .safetensors, .h5). Automatically quarantined and hashed (SHA-256).
+2. Choose **Start scan** to generate structural checks and ModelAudit findings.
+3. Review Findings, Evidence, and Evidence Graph.
+4. Triage models in the **Review Queue** or on the **Artifact Page**.
+5. Evaluate compliance against **Release Policies**.
+6. Commit a signed **Governance Decision** (`APPROVED` / `CONDITIONAL` / `BLOCKED`).
+7. Generate and export the verifiable **Model Security Passport**.
+8. Inspect all operations in the **Audit Trail**.
 
-The current quarantine is a database status and a local storage convention, not a separate hardened quarantine service. APK is an Android application package and is not a supported model upload format.
-
-The provenance form records uploader claims for source, publisher, repository, revision and origin. Those values are marked UNVERIFIED. The risk summary combines hash comparison, scan state and finding severities; it remains INCOMPLETE or INVESTIGATE because publisher signatures and full scanner coverage are unavailable. The graph links artifacts, hashes, provenance, scanners, findings and evidence. It does not contain policy or decision nodes, which belong to Member 3.
-
-Frontend modules are under frontend/src/pages/auth, dashboard, artifacts and security. Their shared UI and routing live under frontend/src/components/common and frontend/src/routes. Backend endpoints and storage are implemented in backend/main.py, backend/store.py and backend/scanner.py.
+Frontend modules live under `frontend/src/pages/auth`, `dashboard`, `artifacts`, `security`, and `governance`. Shared UI and layout live under `frontend/src/components/common` and `frontend/src/routes`. Backend endpoints and storage are implemented in `backend/main.py`, `backend/store.py`, and `backend/scanner.py`.
 
 ## Validate
 

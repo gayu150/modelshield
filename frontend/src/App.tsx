@@ -18,6 +18,8 @@ import Dashboard from "./pages/dashboard/Dashboard";
 import ArtifactPage from "./pages/artifacts/ArtifactPage";
 import UploadPage from "./pages/artifacts/UploadPage";
 import DetailPage from "./pages/artifacts/DetailPage";
+import ReviewQueuePage from "./pages/governance/ReviewQueuePage";
+import GovernancePage from "./pages/governance/GovernancePage";
 
 function ArtifactRecord({
   route,
@@ -143,20 +145,37 @@ function Workspace() {
           onRefresh={() => setRevision((x) => x + 1)}
         />
       )}
-      {[
-        "not-found",
-        "review-queue",
-        "governance",
-        "policies",
-        "audit-trail",
-      ].includes(route.page) && (
-        <EmptyState
-          title={
-            route.page === "not-found"
-              ? "Page not found"
-              : "Outside the current module scope"
+      {route.page === "review-queue" && (
+        <ReviewQueuePage
+          items={items.length ? items : demoItems}
+          onOpen={(id) => go(artifactUrl(id))}
+          onDecisionUpdated={(rec) => {
+            if (DEMO_MODE) {
+              setDemoItems((prev) =>
+                prev.map((it) =>
+                  it.id === rec.artifactId ? { ...it, decision: rec.decision } : it,
+                ),
+              );
+            } else {
+              setRevision((x) => x + 1);
+            }
+            setNotice(`Decision recorded: ${rec.decision} for artifact.`);
+          }}
+        />
+      )}
+      {["governance", "policies", "audit-trail"].includes(route.page) && (
+        <GovernancePage
+          section={
+            route.page === "policies"
+              ? "policies"
+              : route.page === "audit-trail"
+              ? "audit"
+              : "all"
           }
-        >
+        />
+      )}
+      {route.page === "not-found" && (
+        <EmptyState title="Page not found">
           <a href="#/artifacts">Back to artifacts</a>
         </EmptyState>
       )}

@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 import secrets
 import sqlite3
 import time
@@ -52,6 +53,31 @@ def initialize():
                 payload TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS evidence_scan ON evidence(scan_id);
+            CREATE TABLE IF NOT EXISTS policies (
+                id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL, version TEXT NOT NULL,
+                description TEXT NOT NULL, status TEXT NOT NULL,
+                target_formats TEXT NOT NULL, rules TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS decisions (
+                id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+                reviewer_id TEXT NOT NULL REFERENCES users(id),
+                reviewer_name TEXT NOT NULL, reviewer_role TEXT NOT NULL,
+                decision TEXT NOT NULL, rationale TEXT NOT NULL,
+                conditions TEXT, valid_until TEXT, created_at TEXT NOT NULL,
+                signature TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS decisions_artifact ON decisions(artifact_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+                user_name TEXT NOT NULL, user_role TEXT NOT NULL,
+                event_type TEXT NOT NULL, target_id TEXT,
+                target_name TEXT, description TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'SUCCESS',
+                payload TEXT, created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS audit_logs_time ON audit_logs(created_at DESC);
         ''')
         # In-process work from a previous server run cannot resume.
         db.execute("UPDATE scans SET status = 'FAILED', error = 'Server restarted during scan.' WHERE status IN ('QUEUED', 'RUNNING')")
@@ -59,6 +85,95 @@ def initialize():
         for column in ('publisher', 'repository', 'revision', 'origin'):
             if column not in columns:
                 db.execute(f'ALTER TABLE artifacts ADD COLUMN {column} TEXT')
+
+        # Seed standard release policies if table is empty
+        policy_count = db.execute('SELECT COUNT(*) FROM policies').fetchone()[0]
+        if policy_count == 0:
+            default_policies = [
+                {
+                    'id': 'POL-PROD-004',
+                    'code': 'PROD-SEC-004',
+                    'name': 'Production Model Security',
+                    'version': '2.0',
+                    'description': 'Enterprise release standard for customer-facing and production inference pipelines. Blocks release on critical findings or hash mismatches.',
+                    'status': 'ACTIVE',
+                    'target_formats': json.dumps(['ONNX', 'PKL', 'PT', 'SAFETENSORS', 'H5']),
+                    'updated_at': '2026-10-01T08:00:00Z',
+                    'rules': json.dumps([
+                        {'id': 'R-01', 'code': 'RULE-CRIT-FAIL', 'title': 'Zero Tolerance Critical Findings',
+                         'description': 'Release blocked if any CRITICAL severity finding is detected in static or structural analysis.',
+                         'trigger': 'CRITICAL', 'action': 'BLOCK', 'enabled': True},
+                        {'id': 'R-02', 'code': 'RULE-HIGH-REVIEW', 'title': 'High Severity Triage Requirement',
+                         'description': 'Artifacts with HIGH severity findings require conditional sign-off with documented mitigation.',
+                         'trigger': 'HIGH', 'action': 'WARN', 'enabled': True},
+                        {'id': 'R-03', 'code': 'RULE-HASH-INTEGRITY', 'title': 'Cryptographic Digest Match',
+                         'description': 'Observed file hash during scan must match the uploader SHA-256 fingerprint exactly.',
+                         'trigger': 'HASH_MISMATCH', 'action': 'BLOCK', 'enabled': True},
+                        {'id': 'R-04', 'code': 'RULE-PROV-CHECK', 'title': 'Supply Chain Provenance Verification',
+                         'description': 'Artifact source and repository claims must be specified and reviewed.',
+                         'trigger': 'UNVERIFIED_PROVENANCE', 'action': 'WARN', 'enabled': True},
+                    ]),
+                },
+                {
+                    'id': 'POL-SANDBOX-001',
+                    'code': 'DEV-SANDBOX-001',
+                    'name': 'Development Sandbox Policy',
+                    'version': '1.1',
+                    'description': 'Permissive governance tier for internal research and scratchpad experimentation. Warns on vulnerabilities without halting evaluation.',
+                    'status': 'ACTIVE',
+                    'target_formats': json.dumps(['ONNX', 'PKL', 'PT', 'SAFETENSORS', 'H5', 'BIN']),
+                    'updated_at': '2026-09-15T12:00:00Z',
+                    'rules': json.dumps([
+                        {'id': 'R-05', 'code': 'RULE-HASH-BASIC', 'title': 'Digest Sanity Check',
+                         'description': 'Blocks corrupted transfers if bytes fail fingerprinting.',
+                         'trigger': 'HASH_MISMATCH', 'action': 'BLOCK', 'enabled': True},
+                        {'id': 'R-06', 'code': 'RULE-CRIT-WARN', 'title': 'Advisory Critical Alert',
+                         'description': 'Flags critical issues for developer remediation before staging promotion.',
+                         'trigger': 'CRITICAL', 'action': 'WARN', 'enabled': True},
+                    ]),
+                },
+                {
+                    'id': 'POL-FIN-009',
+                    'code': 'FIN-COMPLY-009',
+                    'name': 'Regulated Financial AI Standard',
+                    'version': '3.0',
+                    'description': 'Strict compliance policy for banking, fraud detection, and credit scoring models under regulatory scrutiny.',
+                    'status': 'ACTIVE',
+                    'target_formats': json.dumps(['ONNX', 'SAFETENSORS']),
+                    'updated_at': '2026-10-05T09:30:00Z',
+                    'rules': json.dumps([
+                        {'id': 'R-07', 'code': 'RULE-STRICT-CRIT', 'title': 'Critical Security Zero-Tolerance',
+                         'description': 'Immediate release veto on any discovered code execution or serialization risk.',
+                         'trigger': 'CRITICAL', 'action': 'BLOCK', 'enabled': True},
+                        {'id': 'R-08', 'code': 'RULE-STRICT-HIGH', 'title': 'High Severity Zero-Tolerance',
+                         'description': 'High severity findings unconditionally block release in regulated tiers.',
+                         'trigger': 'HIGH', 'action': 'BLOCK', 'enabled': True},
+                        {'id': 'R-09', 'code': 'RULE-PROV-MANDATORY', 'title': 'Verified Publisher Identity',
+                         'description': 'Unverified provenance claims immediately block release.',
+                         'trigger': 'UNVERIFIED_PROVENANCE', 'action': 'BLOCK', 'enabled': True},
+                    ]),
+                },
+            ]
+            for p in default_policies:
+                db.execute('''INSERT INTO policies (id, code, name, version, description, status, target_formats, rules, updated_at)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                           (p['id'], p['code'], p['name'], p['version'], p['description'], p['status'],
+                            p['target_formats'], p['rules'], p['updated_at']))
+
+
+def record_audit(db: sqlite3.Connection, user_id: str, user_name: str, user_role: str,
+                 event_type: str, description: str, target_id: str | None = None,
+                 target_name: str | None = None, status: str = 'SUCCESS',
+                 details: dict | None = None):
+    audit_id = 'AUD-' + secrets.token_hex(6).upper()
+    now_iso = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    db.execute('''INSERT INTO audit_logs (id, user_id, user_name, user_role, event_type,
+                                          target_id, target_name, description, status, payload, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               (audit_id, user_id, user_name, user_role, event_type, target_id, target_name,
+                description, status, json.dumps(details or {}), now_iso))
+    return audit_id
+
 
 
 @contextmanager
