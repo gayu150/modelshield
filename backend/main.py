@@ -13,10 +13,19 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field
 
-from .config import ALLOWED_HOSTS, FORCE_SECURE_COOKIE, MAX_UPLOAD_BYTES, SESSION_SECONDS, UPLOAD_DIR
-from .scanner import EXTENSIONS, digest, report, utc_now, validate_content
-from .modelaudit_adapter import ScannerUnavailable, scan as modelaudit_scan
-from .store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, record_audit
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from backend.config import ALLOWED_HOSTS, FORCE_SECURE_COOKIE, MAX_UPLOAD_BYTES, SESSION_SECONDS, UPLOAD_DIR
+    from backend.scanner import EXTENSIONS, digest, report, utc_now, validate_content
+    from backend.modelaudit_adapter import ScannerUnavailable, scan as modelaudit_scan
+    from backend.store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, record_audit
+else:
+    from .config import ALLOWED_HOSTS, FORCE_SECURE_COOKIE, MAX_UPLOAD_BYTES, SESSION_SECONDS, UPLOAD_DIR
+    from .scanner import EXTENSIONS, digest, report, utc_now, validate_content
+    from .modelaudit_adapter import ScannerUnavailable, scan as modelaudit_scan
+    from .store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, record_audit
 
 
 @asynccontextmanager
@@ -727,4 +736,9 @@ def audit_trail(event_type: str | None = None, target_id: str | None = None, use
             'status': r['status'],
             'details': json.loads(r['payload']) if r['payload'] else {}
         } for r in rows]
+
+
+if __name__ == '__main__':
+    import uvicorn
+    uvicorn.run(app, host='127.0.0.1', port=8000)
 
