@@ -1,6 +1,6 @@
 # ModelShield
 
-ModelShield provides an end-to-end evidence-based security release governance platform for ML model artifacts. It connects Member 1 (artifact intake & fingerprinting), Member 2 (security scanning & evidence graph), and Member 3 (release policies, review queue, decision engine, model security passport, and tamper-evident audit trail).
+ModelShield provides evidence-based security release governance for ML model artifacts, connecting artifact intake, security scanning, findings, evidence, policy evaluation, human review, security passports, and an auditable decision history.
 
 ## Run locally
 
@@ -14,7 +14,7 @@ python -m backend.create_user
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-The account creation command prompts for an email, display name and password. No default account is included. On macOS/Linux, use `backend/.venv-scanner/bin/python` for the scanner install. A custom scanner executable can be set through `MODELSHIELD_MODELAUDIT_BIN`. In another terminal:
+The account creation command prompts for an email, display name, role, and password. Create a **security reviewer** or **admin** account to record review decisions; public sign-ups receive the analyst role. No default account is included. On macOS/Linux, use `backend/.venv-scanner/bin/python` for the scanner install. A custom scanner executable can be set through `MODELSHIELD_MODELAUDIT_BIN`. In another terminal:
 
 ```powershell
 Copy-Item frontend/.env.example frontend/.env.local
@@ -28,30 +28,27 @@ Vite listens on 127.0.0.1 and proxies /api to the backend on 127.0.0.1:8000. Set
 
 ## What works
 
-- **Member 1 (Intake & Registry)**: Session login/logout, registry statistics, artifact search/filter/pagination, validated upload, SHA-256 fingerprinting, artifact detail, and scan control.
-- **Member 2 (Security & Evidence)**: Static and ModelAudit 0.2.52 scanner findings, evidence timeline, provenance claims, and risk summary.
-- **Member 3 (Governance & Decisions)**:
-  - **Review Queue**: Triage workstation for quarantined and conditional models with filters and quick actions.
-  - **Release Policies**: Active policy catalog (e.g. `PROD-SEC-004`, `DEV-SANDBOX-001`, `FIN-COMPLY-009`) with automated rule evaluation against scanner findings and cryptographic hash integrity.
-  - **Decision Engine**: Reviewer sign-off dialog to record decisions (`APPROVED`, `CONDITIONAL`, `QUARANTINED`, `BLOCKED`) with required rationale, operational conditions, and CSRF protection.
-  - **Model Security Passport**: Official verifiable attestation certificate with JSON export and print views.
-  - **Audit Trail**: Immutable chronological activity stream tracking logins, uploads, scans, policy checks, decisions, and passport generation.
-  - **Evidence Graph**: Linked Policy and Decision nodes connecting directly to the artifact and scanner evidence graph.
+- **Artifact intake**: Session login/logout, registry search/filter/pagination, validated uploads, and SHA-256 fingerprints.
+- **Security analysis**: Static and ModelAudit 0.2.52 findings, evidence timeline, provenance claims, and risk summary.
+- **Policy and release governance**:
+  - Opening an unscanned artifact starts its security scan automatically.
+  - The centralized backend policy evaluator automatically records explainable, versioned `APPROVED`, `CONDITIONAL`, `QUARANTINED`, or `BLOCKED` decisions after a scan. Conditions and evidence are stored with the decision; mandatory blocking rules cannot be overridden.
+  - The Review Queue shows each artifact's automatic policy decision and supports authorized review when additional governance action is needed.
+  - The policy catalog, Model Security Passport, audit trail, and evidence graph expose the rules and evidence behind each result.
 
 ## Integrated Pipeline Flow
 
-$$\text{Upload (M1)} \to \text{Artifact (M1)} \to \text{Scan (M1)} \to \text{Findings (M2)} \to \text{Evidence (M2)} \to \mathbf{\text{Policy (M3)}} \to \mathbf{\text{Decision (M3)}} \to \mathbf{\text{Passport (M3)}} \to \mathbf{\text{Audit (M3)}}$$
+$$\text{Upload} \to \text{Quarantine} \to \text{Scan} \to \text{Findings + Evidence} \to \text{Policy Evaluation} \to \text{Human Review if Needed} \to \text{Final Decision} \to \text{Passport + Audit}$$
 
-1. Upload supported ML model (.onnx, .pkl, .pt, .safetensors, .h5). Automatically quarantined and hashed (SHA-256).
-2. Choose **Start scan** to generate structural checks and ModelAudit findings.
-3. Review Findings, Evidence, and Evidence Graph.
-4. Triage models in the **Review Queue** or on the **Artifact Page**.
-5. Evaluate compliance against **Release Policies**.
-6. Commit a signed **Governance Decision** (`APPROVED` / `CONDITIONAL` / `BLOCKED`).
-7. Generate and export the verifiable **Model Security Passport**.
-8. Inspect all operations in the **Audit Trail**.
+1. Upload a supported model file (`.onnx`, `.pkl`, `.pt`, `.safetensors`, `.h5`). ModelShield quarantines and fingerprints it.
+2. Opening its details starts the scan automatically. Demo mode uses sample records and does not scan uploaded bytes.
+3. When scanning completes, the active policy evaluates the scan and automatically applies its decision. The Review Queue shows the outcome, rationale, and recorded conditions.
+4. Review flagged artifacts in **Review Queue**, inspect the evidence, and record an outcome with a required rationale.
+5. View the final decision in the **Model Security Passport** and its history in the **Audit Trail**.
 
 Frontend modules live under `frontend/src/pages/auth`, `dashboard`, `artifacts`, `security`, and `governance`. Shared UI and layout live under `frontend/src/components/common` and `frontend/src/routes`. Backend endpoints and storage are implemented in `backend/main.py`, `backend/store.py`, and `backend/scanner.py`.
+
+See [the policy engine guide](docs/policy-engine.md) for decision precedence, integrated endpoints, demonstration defaults, and current security-signal limitations.
 
 ## Validate
 

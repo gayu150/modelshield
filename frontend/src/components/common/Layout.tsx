@@ -11,7 +11,6 @@ import {
   Shield,
   ShieldAlert,
   UploadCloud,
-  X,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { DEMO_MODE } from "../../config";
@@ -28,6 +27,9 @@ export default function Layout({
 }) {
   const { user, signOut } = useAuth();
   const [mobile, setMobile] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(
+    () => localStorage.getItem("modelshield-sidebar-hidden") === "true",
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -45,7 +47,13 @@ export default function Layout({
   const artifactActive = ["artifacts", "detail", "upload", "security"].includes(
     route.page,
   );
-  const label = route.page === "security" ? route.tab : route.page;
+  const mobileViewport = window.matchMedia("(max-width: 820px)").matches;
+  const label =
+    route.page === "security"
+      ? route.tab
+      : route.page === "review-queue"
+        ? "review queue"
+        : route.page;
   async function exit() {
     setBusy(true);
     setError("");
@@ -58,8 +66,18 @@ export default function Layout({
       setBusy(false);
     }
   }
+  function toggleNavigation() {
+    if (window.matchMedia("(max-width: 820px)").matches) {
+      setMobile((open) => !open);
+      return;
+    }
+    setSidebarHidden((hidden) => {
+      localStorage.setItem("modelshield-sidebar-hidden", String(!hidden));
+      return !hidden;
+    });
+  }
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarHidden ? " sidebar-hidden" : ""}`}>
       <a
         className="skip-link"
         href="#main-content"
@@ -82,13 +100,6 @@ export default function Layout({
             model<span>shield</span>
             <small>MODEL SECURITY PLATFORM</small>
           </span>
-        </button>
-        <button
-          className="mobile-close btn outline"
-          aria-label="Close menu"
-          onClick={() => setMobile(false)}
-        >
-          <X size={18} />
         </button>
         <div className="workspace">
           <b>M</b>
@@ -209,9 +220,11 @@ export default function Layout({
           <div className="crumb">
             <button
               className="mobile-menu"
-              onClick={() => setMobile(true)}
-              aria-label="Open navigation"
-              aria-expanded={mobile}
+              onClick={toggleNavigation}
+              aria-label={mobileViewport ? (mobile ? "Hide navigation panel" : "Show navigation panel") : (sidebarHidden ? "Show navigation panel" : "Hide navigation panel")}
+              aria-expanded={mobileViewport ? mobile : !sidebarHidden}
+              aria-pressed={mobileViewport ? mobile : !sidebarHidden}
+              title={mobileViewport ? "Toggle navigation panel" : (sidebarHidden ? "Show navigation panel" : "Hide navigation panel")}
             >
               <Menu size={20} />
             </button>
@@ -246,7 +259,7 @@ export default function Layout({
         </button>
         <button onClick={() => go("/review-queue")}>
           <ShieldAlert size={20} />
-          <span>Reviews</span>
+          <span>Review queue</span>
         </button>
         <button onClick={() => go("/governance")}>
           <Activity size={20} />

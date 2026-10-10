@@ -25,6 +25,9 @@ export async function getArtifact(id: string, signal?: AbortSignal) {
   if (item.id !== id) throw new Error("Unexpected artifact response.");
   return item;
 }
+export async function deleteArtifact(id: string): Promise<void> {
+  await api(path(id), { method: "DELETE" });
+}
 export async function uploadArtifact(input: ArtifactUpload) {
   const body = new FormData();
   body.append("file", input.file);
@@ -40,6 +43,10 @@ export async function uploadArtifact(input: ArtifactUpload) {
 export async function startArtifactScan(id: string) {
   const response = record(await api(path(id) + "/scan", { method: "POST" }));
   return { scan_id: identifier(response.scan_id) };
+}
+export async function getLatestArtifactScan(id: string, signal?: AbortSignal) {
+  const response = record(await api(path(id) + "/scan", { signal }));
+  return response.scan == null ? undefined : parseScan(response.scan);
 }
 export async function getScan(id: string, signal?: AbortSignal) {
   const scan = parseScan(

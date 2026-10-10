@@ -34,6 +34,7 @@ export async function request<T = unknown>(
       401: "Your session has expired. Sign in again.",
       403: "You do not have permission to access this resource.",
       404: "The requested resource was not found.",
+      405: "This backend version does not support this action. Restart the ModelShield API server, then try again.",
       409: "The request conflicts with an existing operation. Refresh and try again.",
       413: "The file exceeds the server upload limit.",
       422: "The server rejected the submitted data.",

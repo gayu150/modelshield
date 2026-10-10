@@ -41,6 +41,24 @@ export async function evaluateArtifactPolicy(
   );
 }
 
+export async function replayArtifactDecision(artifactId: string): Promise<{
+  replayId: string;
+  originalDecision: Decision;
+  originalDecisionAt?: string;
+  evaluation: PolicyEvaluation;
+}> {
+  const value = await api<Record<string, unknown>>(artifactPath(artifactId) + "/replay", { method: "POST" });
+  const originalDecision = value.originalDecision;
+  if (!["APPROVED", "CONDITIONAL", "QUARANTINED", "BLOCKED"].includes(String(originalDecision)))
+    throw new Error("Invalid replay decision response.");
+  return {
+    replayId: String(value.replayId),
+    originalDecision: originalDecision as Decision,
+    ...(typeof value.originalDecisionAt === "string" ? { originalDecisionAt: value.originalDecisionAt } : {}),
+    evaluation: parsePolicyEvaluation(value.evaluation),
+  };
+}
+
 export async function submitDecision(
   artifactId: string,
   decision: Decision,

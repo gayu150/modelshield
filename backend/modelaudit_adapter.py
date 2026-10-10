@@ -93,8 +93,14 @@ def scan(path: Path, extension: str, artifact_id: str, scan_id: str, observed_ha
                                     timeout=120, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ScannerUnavailable('ModelAudit could not complete within the scan limit.') from exc
-        if result.returncode not in (0, 1) or not output.is_file() or output.stat().st_size > MAX_REPORT_BYTES:
-            raise ScannerUnavailable('ModelAudit failed or returned no bounded report.')
+        if result.returncode not in (0, 1):
+            raise ScannerUnavailable(f'ModelAudit exited with code {result.returncode}.')
+        if not output.is_file():
+            raise ScannerUnavailable(
+                f'ModelAudit exited with code {result.returncode} without generating a JSON report.'
+            )
+        if output.stat().st_size > MAX_REPORT_BYTES:
+            raise ScannerUnavailable('ModelAudit report exceeded the 8 MiB size limit.')
         try:
             report = json.loads(output.read_text(encoding='utf-8'))
         except (UnicodeError, json.JSONDecodeError) as exc:

@@ -1,11 +1,15 @@
 import hmac
 import json
+import logging
 import os
+import re
 import secrets
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -20,12 +24,14 @@ if __package__ in (None, ""):
     from backend.config import ALLOWED_HOSTS, FORCE_SECURE_COOKIE, MAX_UPLOAD_BYTES, SESSION_SECONDS, UPLOAD_DIR
     from backend.scanner import EXTENSIONS, digest, report, utc_now, validate_content
     from backend.modelaudit_adapter import ScannerUnavailable, scan as modelaudit_scan
-    from backend.store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, record_audit
+    from backend.policy_engine import PolicyDefinitionError, evaluate_policy as run_policy_engine
+    from backend.store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, password_hash, record_audit
 else:
     from .config import ALLOWED_HOSTS, FORCE_SECURE_COOKIE, MAX_UPLOAD_BYTES, SESSION_SECONDS, UPLOAD_DIR
     from .scanner import EXTENSIONS, digest, report, utc_now, validate_content
     from .modelaudit_adapter import ScannerUnavailable, scan as modelaudit_scan
-    from .store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, record_audit
+    from .policy_engine import PolicyDefinitionError, evaluate_policy as run_policy_engine
+    from .store import DUMMY_PASSWORD_HASH, check_password, connect, end_session, find_session, initialize, new_session, password_hash, record_audit
 
 
 @asynccontextmanager
@@ -74,6 +80,13 @@ class Credentials(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class Registration(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=2, max_length=100)
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=12, max_length=1024)
+
+
 def current_user(request: Request):
     token = request.cookies.get('modelshield_session')
     with connect() as db:
@@ -103,14 +116,46 @@ def latest_scan(db: sqlite3.Connection, artifact_id: str):
                          ORDER BY created_at DESC, id DESC LIMIT 1''', (artifact_id,)).fetchone()
 
 
+def current_scan(db: sqlite3.Connection, artifact_id: str):
+    return db.execute('''SELECT * FROM scans WHERE artifact_id = ?
+                         ORDER BY created_at DESC, rowid DESC LIMIT 1''', (artifact_id,)).fetchone()
+
+
+def policy_findings(db: sqlite3.Connection, scan_row):
+    if scan_row is None or scan_row['status'] != 'COMPLETED':
+        return []
+    return [json.loads(row['payload']) for row in db.execute(
+        'SELECT payload FROM findings WHERE scan_id = ? ORDER BY rowid', (scan_row['id'],)
+    ).fetchall()]
+
+
 def artifact_json(db: sqlite3.Connection, row):
     scan = latest_scan(db, row['id'])
+    scan_progress = db.execute('''SELECT status FROM scans WHERE artifact_id = ?
+                                 ORDER BY created_at DESC, id DESC LIMIT 1''', (row['id'],)).fetchone()
     findings = db.execute('SELECT COUNT(*) FROM findings WHERE scan_id = ?',
                           (scan['id'],)).fetchone()[0] if scan else 0
+    evaluation_row = db.execute('''SELECT id, result_payload FROM policy_evaluations WHERE artifact_id = ?
+                                   ORDER BY created_at DESC, rowid DESC LIMIT 1''', (row['id'],)).fetchone()
+    evaluation = json.loads(evaluation_row['result_payload']) if evaluation_row else {}
+    latest_state = scan_progress['status'] if scan_progress else 'NOT_SCANNED'
+    if latest_state != 'COMPLETED' and evaluation.get('scanStatus') != latest_state:
+        evaluation = {}
+    linked_decision = db.execute('''SELECT id, reviewer_role FROM decisions WHERE artifact_id = ?
+                                   AND artifact_hash = ? AND policy_version = ?
+                                   ORDER BY created_at DESC, id DESC LIMIT 1''',
+                                 (row['id'], evaluation.get('artifactHash'), evaluation.get('policyVersion'))).fetchone() if evaluation else None
+    review_required = latest_state != 'COMPLETED' or (
+        bool(evaluation.get('requiresHumanReview')) and
+        (linked_decision is None or linked_decision['reviewer_role'] == 'Automated Policy Engine')
+    )
     return {'id': row['id'], 'name': row['name'], 'model': row['model'],
             'version': row['version'], 'format': row['format'],
             'uploadedBy': row['owner_name'], 'uploadedAt': row['uploaded_at'],
             'decision': row['decision'], 'findings': findings, 'hash': row['sha256'],
+            'scanStatus': latest_state,
+            'policyOutcome': evaluation.get('decision'),
+            'reviewRequired': review_required,
             'provenance': {'source': row['source'], 'publisher': row['publisher'],
                            'repository': row['repository'], 'revision': row['revision'],
                            'origin': row['origin'],
@@ -148,6 +193,29 @@ def login(payload: Credentials, request: Request, response: Response):
                         httponly=True, secure=FORCE_SECURE_COOKIE or request.url.scheme == 'https',
                         samesite='strict', path='/')
     return {'id': user['id'], 'email': user['email'], 'name': user['name'], 'role': user['role']}
+
+
+@app.post('/auth/register', status_code=201)
+def register(payload: Registration, request: Request, response: Response):
+    name = payload.name.strip()
+    email = payload.email.strip().lower()
+    if len(name) < 2 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(422, 'Enter a valid name and email address.')
+    user_id = str(uuid.uuid4())
+    role = 'analyst'
+    try:
+        with connect() as db:
+            db.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?)',
+                       (user_id, email, name, role, password_hash(payload.password)))
+            token = new_session(db, user_id)
+            record_audit(db, user_id, name, role, 'USER_REGISTERED',
+                         f'User {name} created an account.')
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, 'An account with this email already exists.') from None
+    response.set_cookie('modelshield_session', token, max_age=SESSION_SECONDS,
+                        httponly=True, secure=FORCE_SECURE_COOKIE or request.url.scheme == 'https',
+                        samesite='strict', path='/')
+    return {'id': user_id, 'email': email, 'name': name, 'role': role}
 
 
 @app.get('/auth/me')
@@ -221,6 +289,8 @@ async def upload(file: UploadFile = File(...), model_name: str = Form(...),
             row = db.execute('''SELECT artifacts.*, users.name AS owner_name FROM artifacts
                                 JOIN users ON users.id = owner_id WHERE artifacts.id = ?''',
                              (artifact_id,)).fetchone()
+
+
             record_audit(db, user['id'], user['name'], user['role'], 'ARTIFACT_UPLOAD',
                          f"Uploaded artifact {name} ({extension.removeprefix('.').upper()}). Automatically placed in QUARANTINED state.",
                          target_id=artifact_id, target_name=name,
@@ -246,12 +316,54 @@ def artifact(artifact_id: str, user=Depends(current_user)):
         return artifact_json(db, row)
 
 
+@app.delete('/artifacts/{artifact_id}', status_code=204)
+def delete_artifact(artifact_id: str, user=Depends(csrf_user)):
+    stored_path = None
+    with connect() as db:
+        row = owned_artifact(db, artifact_id, user['id'])
+        active_scan = db.execute('''SELECT id FROM scans WHERE artifact_id = ?
+                                    AND status IN ('QUEUED','RUNNING') LIMIT 1''',
+                                 (artifact_id,)).fetchone()
+        if active_scan:
+            raise HTTPException(409, 'Wait for the security scan to finish before deleting this artifact.')
+        stored_path = row['path']
+        record_audit(db, user['id'], user['name'], user['role'], 'ARTIFACT_DELETED',
+                     f"Deleted artifact {row['name']} and its scan records.",
+                     target_id=artifact_id, target_name=row['name'],
+                     details={'decision': row['decision']})
+        scan_ids = [item['id'] for item in db.execute('SELECT id FROM scans WHERE artifact_id = ?',
+                                                       (artifact_id,)).fetchall()]
+        for scan_id in scan_ids:
+            db.execute('DELETE FROM findings WHERE scan_id = ?', (scan_id,))
+            db.execute('DELETE FROM evidence WHERE scan_id = ?', (scan_id,))
+        db.execute('DELETE FROM policy_evaluations WHERE artifact_id = ?', (artifact_id,))
+        db.execute('DELETE FROM decisions WHERE artifact_id = ?', (artifact_id,))
+        db.execute('DELETE FROM scans WHERE artifact_id = ?', (artifact_id,))
+        db.execute('DELETE FROM artifacts WHERE id = ?', (artifact_id,))
+    if stored_path:
+        try:
+            Path(stored_path).unlink(missing_ok=True)
+        except OSError:
+            # The record and audit entry are authoritative; a leftover file can
+            # be removed by storage maintenance without restoring the artifact.
+            pass
+    return Response(status_code=204)
+
+
 def run_scan(scan_id: str, artifact_id: str, path: str, extension: str, expected_hash: str):
     try:
         with connect() as db:
-            db.execute('UPDATE scans SET status = ? WHERE id = ?', ('RUNNING', scan_id))
+            db.execute("UPDATE scans SET status = ?, modelaudit_status = ?, modelaudit_error = NULL WHERE id = ?",
+                       ('RUNNING', 'RUNNING', scan_id))
         findings, evidence, observed = report(Path(path), extension, expected_hash)
-        external_findings, external_evidence = modelaudit_scan(Path(path), extension, artifact_id, scan_id, observed)
+        modelaudit_status, modelaudit_error = 'COMPLETED', None
+        try:
+            external_findings, external_evidence = modelaudit_scan(Path(path), extension, artifact_id, scan_id, observed)
+        except ScannerUnavailable as exc:
+            # Preserve built-in structural results; the policy engine will
+            # quarantine because external scanner coverage is incomplete.
+            external_findings, external_evidence = [], []
+            modelaudit_status, modelaudit_error = 'FAILED', str(exc)
         findings.extend(external_findings)
         evidence.extend(external_evidence)
         for item in evidence:
@@ -266,21 +378,23 @@ def run_scan(scan_id: str, artifact_id: str, path: str, extension: str, expected
             for item in evidence:
                 db.execute('INSERT INTO evidence VALUES (?, ?, ?)',
                            (item['id'], scan_id, json.dumps(item)))
-            db.execute('UPDATE scans SET status = ?, progress = ?, completed_at = ?, observed_hash = ? WHERE id = ?',
-                       ('COMPLETED', 100, utc_now(), observed, scan_id))
-            art = db.execute('''SELECT artifacts.name, users.id AS user_id, users.name AS user_name, users.role AS user_role
-                                FROM artifacts JOIN users ON users.id = artifacts.owner_id WHERE artifacts.id = ?''',
-                             (artifact_id,)).fetchone()
-            if art:
-                record_audit(db, art['user_id'], art['user_name'], art['user_role'], 'SCAN_COMPLETED',
-                             f"Scan completed for {art['name']} with {len(findings)} findings.",
-                             target_id=artifact_id, target_name=art['name'],
-                             details={'findingsCount': len(findings), 'scanId': scan_id})
+            db.execute('''UPDATE scans SET progress = ?, observed_hash = ?,
+                          modelaudit_status = ?, modelaudit_error = ? WHERE id = ?''',
+                       (99, observed, modelaudit_status, modelaudit_error, scan_id))
+        apply_automated_policy_decision(artifact_id)
     except Exception as exc:
+        logger.exception('Security scan failed for scan id %s', scan_id)
         failure = str(exc) if isinstance(exc, ScannerUnavailable) else 'Scanner failed.'
         with connect() as db:
             db.execute('UPDATE scans SET status = ?, progress = ?, completed_at = ?, error = ? WHERE id = ?',
                        ('FAILED', 100, utc_now(), failure, scan_id))
+            db.execute("UPDATE scans SET modelaudit_status = 'FAILED', modelaudit_error = ? WHERE id = ?",
+                       (failure, scan_id))
+            db.execute("UPDATE artifacts SET decision = 'QUARANTINED' WHERE id = ?", (artifact_id,))
+        try:
+            apply_automated_policy_decision(artifact_id)
+        except Exception:
+            logger.exception('Could not persist the automatic quarantine decision for scan id %s', scan_id)
 
 
 @app.post('/artifacts/{artifact_id}/scan', status_code=202)
@@ -303,6 +417,24 @@ def start_scan(artifact_id: str, background_tasks: BackgroundTasks, user=Depends
     return {'scan_id': scan_id}
 
 
+@app.get('/artifacts/{artifact_id}/scan')
+def artifact_scan(artifact_id: str, user=Depends(current_user)):
+    with connect() as db:
+        owned_artifact(db, artifact_id, user['id'])
+        # The detail screen needs the newest scan in every lifecycle state.
+        # Returning only completed scans made an in-flight scan look absent,
+        # causing the client to start a duplicate and receive HTTP 409.
+        scan = db.execute('''SELECT * FROM scans WHERE artifact_id = ?
+                             ORDER BY created_at DESC, id DESC LIMIT 1''',
+                          (artifact_id,)).fetchone()
+        return {'scan': None if scan is None else {
+            'id': scan['id'], 'status': scan['status'], 'progress': scan['progress'],
+            'error': scan['error'] if scan['status'] == 'FAILED' else None,
+            'modelAuditStatus': scan['modelaudit_status'],
+            'modelAuditError': scan['modelaudit_error'],
+        }}
+
+
 @app.get('/scans/{scan_id}')
 def scan_status(scan_id: str, user=Depends(current_user)):
     with connect() as db:
@@ -312,7 +444,9 @@ def scan_status(scan_id: str, user=Depends(current_user)):
         if row is None:
             raise HTTPException(404, 'Scan not found.')
         return {'id': row['id'], 'status': row['status'], 'progress': row['progress'],
-                'error': row['error'] if row['status'] == 'FAILED' else None}
+                'error': row['error'] if row['status'] == 'FAILED' else None,
+                'modelAuditStatus': row['modelaudit_status'],
+                'modelAuditError': row['modelaudit_error']}
 
 
 def report_rows(db, artifact_id: str, user_id: str, table: str):
@@ -379,7 +513,7 @@ def graph(artifact_id: str, user=Depends(current_user)):
         edges.extend({'source': scanner_id, 'target': item['id'], 'label': 'produced'}
                      for item in related_evidence if item.get('scanner') == scanner)
 
-    # Member 3: Policy & Decision nodes in the evidence graph
+    # Policy and automated decision nodes in the evidence graph
     if policy_row:
         policy_node_id = 'policy:' + artifact_id
         nodes.append({'id': policy_node_id, 'label': 'Policy: ' + policy_row['name'], 'kind': 'Policy'})
@@ -436,74 +570,165 @@ def evaluate_artifact_policy(db: sqlite3.Connection, artifact_row, scan_row, fin
     if policy_id:
         policy_row = db.execute('SELECT * FROM policies WHERE id = ? OR code = ?', (policy_id, policy_id)).fetchone()
     else:
-        policy_row = db.execute("SELECT * FROM policies WHERE status = 'ACTIVE' ORDER BY code LIMIT 1").fetchone()
+        policy_row = db.execute("""SELECT * FROM policies WHERE status = 'ACTIVE'
+                                  ORDER BY CASE WHEN code = 'PROD-SEC-004' THEN 0 ELSE 1 END, code
+                                  LIMIT 1""").fetchone()
     if policy_row is None:
         raise HTTPException(404, 'Policy not found.')
-
-    rules = json.loads(policy_row['rules'])
-    rule_evaluations = []
-    overall_outcome = 'PASS'
-
-    critical_count = sum(1 for f in findings if f.get('severity') == 'CRITICAL')
-    high_count = sum(1 for f in findings if f.get('severity') == 'HIGH')
-    medium_count = sum(1 for f in findings if f.get('severity') == 'MEDIUM')
-
-    observed_hash = scan_row['observed_hash'] if scan_row else None
-    hash_mismatch = (observed_hash is not None and not hmac.compare_digest(observed_hash, artifact_row['sha256']))
-    unverified_prov = (
-        not artifact_row['source'] and not artifact_row['publisher'] and not artifact_row['repository']
-    )
-
-    for rule in rules:
-        if not rule.get('enabled', True):
-            continue
-        trigger = rule.get('trigger')
-        action = rule.get('action', 'BLOCK')
-        failed = False
-        reason = 'Evaluation passed without violations.'
-
-        if trigger == 'CRITICAL' and critical_count > 0:
-            failed = True
-            reason = f'Detected {critical_count} CRITICAL findings.'
-        elif trigger == 'HIGH' and high_count > 0:
-            failed = True
-            reason = f'Detected {high_count} HIGH findings requiring governance review.'
-        elif trigger == 'MEDIUM' and medium_count > 0:
-            failed = True
-            reason = f'Detected {medium_count} MEDIUM findings.'
-        elif trigger == 'ANY_FINDING' and len(findings) > 0:
-            failed = True
-            reason = f'Artifact has {len(findings)} findings.'
-        elif trigger == 'HASH_MISMATCH' and hash_mismatch:
-            failed = True
-            reason = 'Observed scan hash does not match artifact SHA-256.'
-        elif trigger == 'UNVERIFIED_PROVENANCE' and unverified_prov:
-            failed = True
-            reason = 'Uploader provenance origin has not been specified or verified.'
-
-        if failed:
-            if action == 'BLOCK':
-                overall_outcome = 'BLOCK'
-            elif action == 'WARN' and overall_outcome != 'BLOCK':
-                overall_outcome = 'CONDITIONAL'
-
-        rule_evaluations.append({
-            'ruleCode': rule.get('code', 'RULE'),
-            'ruleTitle': rule.get('title', 'Rule check'),
-            'passed': not failed,
-            'action': action,
-            'reason': reason
-        })
-
-    return {
-        'policyId': policy_row['id'],
-        'policyCode': policy_row['code'],
-        'policyName': policy_row['name'],
-        'policyVersion': policy_row['version'],
-        'overallOutcome': overall_outcome,
-        'ruleEvaluations': rule_evaluations,
-        'evaluatedAt': utc_now()
+    policy = dict(policy_row)
+    policy['rules'] = json.loads(policy_row['rules'])
+    policy['target_formats'] = json.loads(policy_row['target_formats'])
+    provenance_values = [artifact_row[key] for key in ('source', 'publisher', 'repository', 'revision', 'origin')]
+    provenance_status = 'MISSING' if not any(provenance_values) else 'UNVERIFIED'
+    context = {
+        'artifactId': artifact_row['id'], 'format': artifact_row['format'],
+        'expectedHash': artifact_row['sha256'],
+        'observedHash': scan_row['observed_hash'] if scan_row else None,
+        'scanStatus': scan_row['status'] if scan_row else 'NOT_SCANNED',
+        'modelAuditStatus': scan_row['modelaudit_status'] if scan_row else 'UNKNOWN',
+        'findings': findings,
+        'provenanceFields': [key for key, value in zip(('source', 'publisher', 'repository', 'revision', 'origin'), provenance_values) if value],
+        'provenanceStatus': provenance_status,
+        # Signature verification is not implemented by this repository.
+        'signatureStatus': 'UNKNOWN',
+        'evaluatedAt': utc_now(),
     }
+    try:
+        result = run_policy_engine(policy, context)
+    except PolicyDefinitionError as exc:
+        raise HTTPException(500, f'Active policy definition is invalid: {exc}') from None
+    result['evaluationId'] = 'EVAL-' + secrets.token_hex(8).upper()
+    result['evidenceReferences'] = sorted({
+        ref for rule in result['ruleEvaluations'] for ref in rule.get('evidenceRefs', [])
+    })
+    return result
+
+
+def persist_policy_evaluation(db: sqlite3.Connection, artifact_row, evaluation: dict):
+    policy_row = db.execute('SELECT * FROM policies WHERE id = ?', (evaluation['policyId'],)).fetchone()
+    if policy_row is None:
+        raise HTTPException(404, 'Policy not found.')
+    snapshot = {
+        'id': policy_row['id'], 'code': policy_row['code'], 'name': policy_row['name'],
+        'version': policy_row['version'], 'description': policy_row['description'],
+        'targetFormats': json.loads(policy_row['target_formats']),
+        'rules': json.loads(policy_row['rules']),
+    }
+    db.execute('''INSERT INTO policy_evaluations
+                  (id, artifact_id, artifact_hash, policy_id, policy_code, policy_version,
+                   policy_snapshot, result_payload, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+               (evaluation['evaluationId'], artifact_row['id'], artifact_row['sha256'],
+                evaluation['policyId'], evaluation['policyCode'], evaluation['policyVersion'],
+                json.dumps(snapshot), json.dumps(evaluation), evaluation['evaluatedAt']))
+
+
+def apply_automated_policy_decision(artifact_id: str):
+    with connect() as db:
+        artifact_row = db.execute('''SELECT artifacts.*, users.name AS owner_name,
+                                            users.role AS owner_role
+                                     FROM artifacts JOIN users ON users.id = artifacts.owner_id
+                                     WHERE artifacts.id = ?''', (artifact_id,)).fetchone()
+        scan_row = db.execute('''SELECT * FROM scans WHERE artifact_id = ?
+                                 AND status IN ('RUNNING', 'FAILED')
+                                 ORDER BY created_at DESC, id DESC LIMIT 1''', (artifact_id,)).fetchone()
+        if artifact_row is None or scan_row is None:
+            return
+
+        try:
+            completed_scan = dict(scan_row)
+            # Findings and digest are final at this point; publish COMPLETED
+            # only after policy application finishes to avoid polling races.
+            if completed_scan['status'] == 'RUNNING':
+                completed_scan['status'] = 'COMPLETED'
+            evaluation = evaluate_artifact_policy(
+                db, artifact_row, completed_scan,
+                [json.loads(row['payload']) for row in db.execute(
+                    'SELECT payload FROM findings WHERE scan_id = ? ORDER BY rowid',
+                    (scan_row['id'],),
+                ).fetchall()],
+            )
+            persist_policy_evaluation(db, artifact_row, evaluation)
+        except HTTPException as exc:
+            db.execute("UPDATE artifacts SET decision = 'QUARANTINED' WHERE id = ?", (artifact_id,))
+            record_audit(db, artifact_row['owner_id'], 'ModelShield Policy Engine',
+                         'Automated Policy Engine', 'POLICY_EVALUATION',
+                         f"Automatic release decision was not made for {artifact_row['name']}: {exc.detail}",
+                         target_id=artifact_id, target_name=artifact_row['name'], status='FAILURE',
+                         details={'requiresHumanReview': True, 'evaluationError': exc.detail})
+            final_scan_status = 'FAILED' if scan_row['status'] == 'FAILED' else 'COMPLETED'
+            db.execute('UPDATE scans SET status = ?, progress = ?, completed_at = ? WHERE id = ?',
+                       (final_scan_status, 100, utc_now(), scan_row['id']))
+            finding_count = db.execute('SELECT COUNT(*) FROM findings WHERE scan_id = ?',
+                                       (scan_row['id'],)).fetchone()[0]
+            record_audit(db, artifact_row['owner_id'], artifact_row['owner_name'], artifact_row['owner_role'],
+                         'SCAN_FAILED' if final_scan_status == 'FAILED' else 'SCAN_COMPLETED',
+                         f"Scan {'failed' if final_scan_status == 'FAILED' else 'completed'} for {artifact_row['name']} with {finding_count} findings.",
+                         target_id=artifact_id, target_name=artifact_row['name'], status='FAILURE' if final_scan_status == 'FAILED' else 'SUCCESS',
+                         details={'findingsCount': finding_count, 'scanId': scan_row['id']})
+            return
+
+        # Apply and record every policy outcome. Conditional requirements are
+        # generated from the failed rule's rationale/remediation; quarantine is
+        # a recorded restrictive disposition pending any later reviewer action.
+        proposed_decision = evaluation['decision']
+        decision = proposed_decision
+        failed_rules = [rule for rule in evaluation['ruleEvaluations'] if not rule['passed']]
+        rationale = '; '.join(
+            f"{rule['ruleCode']}: {rule['reason']}" for rule in failed_rules
+        ) or f"All enabled checks passed under {evaluation['policyCode']}."
+        rationale = f"Policy evaluation ({evaluation['policyCode']}): {rationale}"[:2000]
+        conditions = [
+            f"{rule['reason']} {rule['remediation']}".strip()
+            for rule in failed_rules
+            if rule['action'] in {'WARN', 'CONDITIONAL'}
+        ]
+        if decision == 'CONDITIONAL' and not conditions:
+            conditions = [rule['remediation'] for rule in failed_rules if rule.get('remediation')]
+        now_iso = utc_now()
+        if decision:
+            decision_id = 'DEC-' + secrets.token_hex(6).upper()
+            signature = '0x' + secrets.token_hex(20)
+            db.execute('UPDATE artifacts SET decision = ? WHERE id = ?', (decision, artifact_id))
+            db.execute('''INSERT INTO decisions (id, artifact_id, reviewer_id, reviewer_name, reviewer_role,
+                                                 decision, rationale, conditions, created_at, signature,
+                                                 evaluation_id, policy_version, artifact_hash)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                       (decision_id, artifact_id, artifact_row['owner_id'], 'ModelShield Policy Engine',
+                        'Automated Policy Engine', decision, rationale, json.dumps(conditions), now_iso, signature,
+                        evaluation['evaluationId'], evaluation['policyVersion'], evaluation['artifactHash']))
+        db.execute('UPDATE artifacts SET decision = ? WHERE id = ?', (decision, artifact_id))
+        record_audit(db, artifact_row['owner_id'], 'ModelShield Policy Engine',
+                     'Automated Policy Engine', 'POLICY_EVALUATION',
+                     f"Evaluated {evaluation['policyCode']} for {artifact_row['name']}: {evaluation['overallOutcome']}.",
+                     target_id=artifact_id, target_name=artifact_row['name'],
+                     status='SUCCESS' if proposed_decision == 'APPROVED' else 'WARNING' if proposed_decision in {'CONDITIONAL', 'QUARANTINED'} else 'FAILURE',
+                     details={'policyCode': evaluation['policyCode'], 'policyVersion': evaluation['policyVersion'],
+                              'outcome': evaluation['overallOutcome'], 'proposedDecision': proposed_decision,
+                              'evaluationId': evaluation['evaluationId'],
+                              'requiresHumanReview': evaluation['requiresHumanReview'],
+                              'ruleEvaluations': evaluation['ruleEvaluations']})
+        if decision:
+            record_audit(db, artifact_row['owner_id'], 'ModelShield Policy Engine',
+                         'Automated Policy Engine', 'DECISION_RECORDED',
+                         f"Policy checks set {artifact_row['name']} to {decision}.",
+                         target_id=artifact_id, target_name=artifact_row['name'],
+                         status='SUCCESS' if decision == 'APPROVED' else 'WARNING' if decision in {'CONDITIONAL', 'QUARANTINED'} else 'FAILURE',
+                         details={'decision': decision, 'rationale': rationale, 'conditions': conditions,
+                                  'policyCode': evaluation['policyCode'], 'policyVersion': evaluation['policyVersion'],
+                                  'evaluationId': evaluation['evaluationId'], 'artifactHash': evaluation['artifactHash'],
+                                  'automated': True})
+        final_scan_status = 'FAILED' if scan_row['status'] == 'FAILED' else 'COMPLETED'
+        db.execute('UPDATE scans SET status = ?, progress = ?, completed_at = ? WHERE id = ?',
+                   (final_scan_status, 100, utc_now(), scan_row['id']))
+        finding_count = db.execute('SELECT COUNT(*) FROM findings WHERE scan_id = ?',
+                                   (scan_row['id'],)).fetchone()[0]
+        record_audit(db, artifact_row['owner_id'], artifact_row['owner_name'], artifact_row['owner_role'],
+                     'SCAN_FAILED' if final_scan_status == 'FAILED' else 'SCAN_COMPLETED',
+                     f"Scan {'failed' if final_scan_status == 'FAILED' else 'completed'} for {artifact_row['name']} with {finding_count} findings.",
+                     target_id=artifact_id, target_name=artifact_row['name'],
+                     status='FAILURE' if final_scan_status == 'FAILED' else 'SUCCESS',
+                     details={'findingsCount': finding_count, 'scanId': scan_row['id']})
 
 
 @app.get('/policies')
@@ -546,39 +771,99 @@ def get_policy(policy_id: str, _user=Depends(current_user)):
 def evaluate_policy(artifact_id: str, policy_id: str | None = None, user=Depends(current_user)):
     with connect() as db:
         art = owned_artifact(db, artifact_id, user['id'])
-        scan = latest_scan(db, artifact_id)
-        findings = report_rows(db, artifact_id, user['id'], 'findings')
+        scan = current_scan(db, artifact_id)
+        findings = policy_findings(db, scan)
         eval_result = evaluate_artifact_policy(db, art, scan, findings, policy_id)
+        persist_policy_evaluation(db, art, eval_result)
         record_audit(db, user['id'], user['name'], user['role'], 'POLICY_EVALUATION',
                      f"Evaluated policy {eval_result['policyCode']} on {art['name']}. Outcome: {eval_result['overallOutcome']}.",
                      target_id=artifact_id, target_name=art['name'],
-                     status='SUCCESS' if eval_result['overallOutcome'] == 'PASS' else 'WARNING' if eval_result['overallOutcome'] == 'CONDITIONAL' else 'FAILURE',
-                     details={'policyCode': eval_result['policyCode'], 'outcome': eval_result['overallOutcome']})
+                     status='SUCCESS' if eval_result['decision'] == 'APPROVED' else 'WARNING' if eval_result['decision'] in {'CONDITIONAL', 'QUARANTINED'} else 'FAILURE',
+                     details={'policyCode': eval_result['policyCode'], 'policyVersion': eval_result['policyVersion'],
+                              'outcome': eval_result['overallOutcome'],
+                              'proposedDecision': eval_result['decision'],
+                              'evaluationId': eval_result['evaluationId'],
+                              'requiresHumanReview': eval_result['requiresHumanReview'],
+                              'ruleEvaluations': eval_result['ruleEvaluations'],
+                              'unknownSignals': eval_result['unknownSignals']})
         return eval_result
+
+
+@app.post('/artifacts/{artifact_id}/replay')
+def replay_decision(artifact_id: str, policy_id: str | None = None, user=Depends(csrf_user)):
+    with connect() as db:
+        art = owned_artifact(db, artifact_id, user['id'])
+        scan = current_scan(db, artifact_id)
+        if scan is None:
+            raise HTTPException(409, 'Complete a security scan before replaying a decision.')
+        findings = policy_findings(db, scan)
+        evaluation = evaluate_artifact_policy(db, art, scan, findings, policy_id)
+        persist_policy_evaluation(db, art, evaluation)
+        original = db.execute('''SELECT decision, created_at FROM decisions WHERE artifact_id = ?
+                                 ORDER BY created_at DESC, id DESC LIMIT 1''', (artifact_id,)).fetchone()
+        replay_id = 'RPL-' + secrets.token_hex(6).upper()
+        record_audit(
+            db, user['id'], user['name'], user['role'], 'DECISION_REPLAY',
+            f"Replayed {art['name']} against {evaluation['policyCode']} version {evaluation['policyVersion']}; original decision preserved.",
+            target_id=artifact_id, target_name=art['name'],
+            status='SUCCESS',
+            details={'replayId': replay_id,
+                     'originalDecision': original['decision'] if original else art['decision'],
+                     'originalDecisionAt': original['created_at'] if original else None,
+                     'policyId': evaluation['policyId'], 'policyCode': evaluation['policyCode'],
+                     'policyVersion': evaluation['policyVersion'], 'evaluation': evaluation})
+        return {'replayId': replay_id,
+                'originalDecision': original['decision'] if original else art['decision'],
+                'originalDecisionAt': original['created_at'] if original else None,
+                'evaluation': evaluation}
 
 
 @app.post('/artifacts/{artifact_id}/decision')
 def make_decision(artifact_id: str, payload: DecisionPayload, user=Depends(csrf_user)):
+    if user['role'].strip().lower() not in {'security reviewer', 'governance admin', 'admin'}:
+        raise HTTPException(403, 'A Security Reviewer or administrator role is required to record a governance decision.')
     decision_val = payload.decision.strip().upper()
     if decision_val not in {'APPROVED', 'CONDITIONAL', 'QUARANTINED', 'BLOCKED'}:
         raise HTTPException(422, 'Invalid decision status.')
+    if decision_val == 'CONDITIONAL' and not payload.conditions:
+        raise HTTPException(422, 'A conditional decision must include at least one explicit condition.')
     with connect() as db:
         art = owned_artifact(db, artifact_id, user['id'])
+        scan = current_scan(db, artifact_id)
+        findings = policy_findings(db, scan)
+        evaluation = evaluate_artifact_policy(db, art, scan, findings)
+        persist_policy_evaluation(db, art, evaluation)
+        policy_decision = evaluation['decision']
+        decision_rank = {'APPROVED': 0, 'CONDITIONAL': 1, 'QUARANTINED': 2, 'BLOCKED': 3}
+        if decision_rank[decision_val] < decision_rank[policy_decision]:
+            raise HTTPException(409, f'The current policy evaluation requires {policy_decision} or a more restrictive decision.')
+        existing = db.execute('''SELECT id, decision, reviewer_role, artifact_hash FROM decisions WHERE artifact_id = ?
+                                 ORDER BY created_at DESC, id DESC LIMIT 1''', (artifact_id,)).fetchone()
+        if existing:
+            if existing['artifact_hash'] == art['sha256']:
+                if decision_rank[decision_val] < decision_rank[existing['decision']]:
+                    raise HTTPException(409, 'A reviewer cannot make the automatic decision less restrictive.')
+                if decision_val == existing['decision'] and existing['reviewer_role'] != 'Automated Policy Engine':
+                    raise HTTPException(409, 'This decision has already been recorded for the current artifact hash.')
         db.execute('UPDATE artifacts SET decision = ? WHERE id = ?', (decision_val, artifact_id))
         dec_id = 'DEC-' + secrets.token_hex(6).upper()
         signature = '0x' + secrets.token_hex(20)
         now_iso = utc_now()
         conditions_json = json.dumps(payload.conditions)
         db.execute('''INSERT INTO decisions (id, artifact_id, reviewer_id, reviewer_name, reviewer_role,
-                                             decision, rationale, conditions, created_at, signature)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                             decision, rationale, conditions, created_at, signature,
+                                             evaluation_id, policy_version, artifact_hash)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                    (dec_id, artifact_id, user['id'], user['name'], user['role'],
-                    decision_val, payload.rationale, conditions_json, now_iso, signature))
+                    decision_val, payload.rationale, conditions_json, now_iso, signature,
+                    evaluation['evaluationId'], evaluation['policyVersion'], evaluation['artifactHash']))
         record_audit(db, user['id'], user['name'], user['role'], 'DECISION_RECORDED',
                      f"Recorded decision {decision_val} for {art['name']}.",
                      target_id=artifact_id, target_name=art['name'],
                      status='SUCCESS' if decision_val == 'APPROVED' else 'WARNING' if decision_val == 'CONDITIONAL' else 'FAILURE',
-                     details={'decision': decision_val, 'rationale': payload.rationale, 'conditions': payload.conditions})
+                     details={'decision': decision_val, 'rationale': payload.rationale, 'conditions': payload.conditions,
+                              'evaluationId': evaluation['evaluationId'], 'policyCode': evaluation['policyCode'],
+                              'policyVersion': evaluation['policyVersion'], 'artifactHash': evaluation['artifactHash']})
         return {
             'id': dec_id,
             'artifactId': artifact_id,
@@ -617,8 +902,8 @@ def get_decisions(artifact_id: str, user=Depends(current_user)):
 def get_passport(artifact_id: str, user=Depends(current_user)):
     with connect() as db:
         art = owned_artifact(db, artifact_id, user['id'])
-        scan = latest_scan(db, artifact_id)
-        findings = report_rows(db, artifact_id, user['id'], 'findings')
+        scan = current_scan(db, artifact_id)
+        findings = policy_findings(db, scan)
         eval_result = evaluate_artifact_policy(db, art, scan, findings)
         dec_row = db.execute('''SELECT * FROM decisions WHERE artifact_id = ?
                                 ORDER BY created_at DESC LIMIT 1''', (artifact_id,)).fetchone()
@@ -664,7 +949,9 @@ def get_passport(artifact_id: str, user=Depends(current_user)):
             'passportId': 'PSP-' + artifact_id[:8].upper(),
             'passportNumber': passport_num,
             'issuedAt': issued_at,
-            'status': 'REVOKED' if art['decision'] == 'BLOCKED' else 'VALID',
+            'status': ('REVOKED' if art['decision'] == 'BLOCKED' else
+                       'PENDING' if art['decision'] == 'QUARANTINED' else
+                       'CONDITIONAL' if art['decision'] == 'CONDITIONAL' else 'VALID'),
             'artifact': {
                 'id': art['id'],
                 'name': art['name'],

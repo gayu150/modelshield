@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { DEMO_MODE } from "../config";
-import { currentUser, login, logout } from "../services/api/auth";
+import { currentUser, login, logout, register } from "../services/api/auth";
 import { ApiError, safeMessage } from "../services/api/client";
 import type { User } from "../types/auth";
 type Auth = {
@@ -14,6 +14,7 @@ type Auth = {
   loading: boolean;
   error: string;
   signIn: (email: string, password: string) => Promise<void>;
+  signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   retry: () => void;
 };
@@ -65,6 +66,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError("");
     setUser(DEMO_MODE ? demoUser : await login(email, password));
   }
+  async function signUp(name: string, email: string, password: string) {
+    setError("");
+    setUser(
+      DEMO_MODE
+        ? { id: "DEMO-USER", name, email, role: "Demo session" }
+        : await register(name, email, password),
+    );
+  }
   async function signOut() {
     if (!DEMO_MODE) await logout();
     setUser(undefined);
@@ -76,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         error,
         signIn,
+        signUp,
         signOut,
         retry: () => setRevision((x) => x + 1),
       }}

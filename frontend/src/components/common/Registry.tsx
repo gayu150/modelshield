@@ -69,7 +69,20 @@ export function Rows({
         </thead>
         <tbody>
           {items.map((x) => (
-            <tr key={x.id} onClick={() => onOpen(x.id)}>
+            <tr
+              key={x.id}
+              onClick={() => onOpen(x.id)}
+              onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onOpen(x.id);
+                }
+              }}
+              tabIndex={0}
+              role="link"
+              aria-label={`Open artifact ${x.name}`}
+            >
               <td>
                 <div className="artifact-cell">
                   <span className={"file-tile " + x.format.toLowerCase()}>

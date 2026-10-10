@@ -212,9 +212,6 @@ button:disabled {
   .finding-dialog {
     padding: 16px;
   }
-  .sidebar.mobile-open .mobile-close {
-    display: block;
-  }
   .security-analysis .toolbar {
     padding: 10px 0;
   }

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -8,7 +8,6 @@ import {
   X,
 } from "lucide-react";
 import type { Artifact, Decision } from "../../types/artifact";
-import type { Finding } from "../../types/security";
 import type { DecisionRecord } from "../../types/governance";
 import { useAuth } from "../../context/AuthContext";
 import { DEMO_MODE } from "../../config";
@@ -16,8 +15,10 @@ import {
   evaluateArtifactAgainstPolicy,
   standardPolicies,
 } from "../../data/governance";
-import { submitDecision } from "../../services/api/governance";
+import { submitDecision, evaluateArtifactPolicy } from "../../services/api/governance";
+import type { PolicyEvaluation } from "../../types/governance";
 import { safeMessage } from "../../services/api/client";
+import { example } from "../../data/security";
 
 const COMMON_CONDITIONS = [
   "Restricted to internal staging/sandbox environment",
@@ -25,35 +26,56 @@ const COMMON_CONDITIONS = [
   "Daily audit logging of all inference queries",
   "Manual secondary approval required for production promotion",
 ];
-
 export default function DecisionModal({
   artifact,
-  findings = [],
   onClose,
   onSuccess,
 }: {
   artifact: Artifact;
-  findings?: Finding[];
   onClose: () => void;
   onSuccess: (record: DecisionRecord) => void;
 }) {
   const { user } = useAuth();
   const [selectedDecision, setSelectedDecision] = useState<Decision>(
-    artifact.decision === "QUARANTINED" ? "APPROVED" : artifact.decision,
+    artifact.decision === "QUARANTINED" ? "QUARANTINED" : artifact.decision,
   );
   const [rationale, setRationale] = useState("");
   const [selectedConditions, setSelectedConditions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [evaluation, setEvaluation] = useState<PolicyEvaluation>();
+  const [evaluationError, setEvaluationError] = useState("");
+  const [evaluationLoading, setEvaluationLoading] = useState(true);
+  const [evaluationAttempt, setEvaluationAttempt] = useState(0);
 
-  const policy = standardPolicies[0]; // PROD-SEC-004
-  const evaluation = useMemo(
-    () => evaluateArtifactAgainstPolicy(artifact, policy, findings),
-    [artifact, policy, findings],
-  );
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = AbortSignal.timeout(15000);
+    const signal = AbortSignal.any([controller.signal, timeout]);
+    setEvaluation(undefined);
+    setEvaluationError("");
+    setEvaluationLoading(true);
+    if (DEMO_MODE) {
+      setEvaluation(evaluateArtifactAgainstPolicy(artifact, standardPolicies[0], example(artifact).findings, artifact.provenance?.observedHash));
+      setEvaluationLoading(false);
+    } else {
+      evaluateArtifactPolicy(artifact.id, undefined, signal)
+        .then((result) => { if (active) setEvaluation(result); })
+        .catch((err) => {
+          if (!active) return;
+          setEvaluationError(timeout.aborted
+            ? "Policy evaluation timed out. Check that the ModelShield API server is running, then retry."
+            : safeMessage(err));
+        })
+        .finally(() => { if (active) setEvaluationLoading(false); });
+    }
+    return () => { active = false; controller.abort(); };
+  }, [artifact.id, evaluationAttempt]);
 
-  const isBlockRecommended = evaluation.overallOutcome === "BLOCK";
-  const isApprovingBlocked = selectedDecision === "APPROVED" && isBlockRecommended;
+  const policyOutcome = evaluation?.overallOutcome || artifact.policyOutcome || "";
+  const isApprovalRestricted = ["BLOCK", "BLOCKED", "QUARANTINED", "CONDITIONAL"].includes(policyOutcome);
+  const isApprovingBlocked = selectedDecision === "APPROVED" && isApprovalRestricted;
 
   function toggleCondition(cond: string) {
     setSelectedConditions((prev) =>
@@ -128,20 +150,29 @@ export default function DecisionModal({
           <div className="policy-compliance-preview">
             <div className="section-head" style={{ marginBottom: 4 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b" }}>
-                ACTIVE RELEASE POLICY: {policy.code} ({policy.name})
+                ACTIVE RELEASE POLICY: {evaluation?.policyCode || standardPolicies[0].code} ({evaluation?.policyName || standardPolicies[0].name})
               </span>
             </div>
 
             <div
-              className={`compliance-status-banner ${evaluation.overallOutcome.toLowerCase()}`}
+              className={`compliance-status-banner ${(evaluation?.overallOutcome || artifact.policyOutcome || "pending").toLowerCase()}`}
             >
-              {evaluation.overallOutcome === "PASS" && (
+              {evaluationLoading && <span>Loading active policy evaluation…</span>}
+              {evaluationError && (
+                <span className="evaluation-error">
+                  {evaluationError}
+                  <button type="button" className="link-button" onClick={() => setEvaluationAttempt((attempt) => attempt + 1)}>
+                    Retry evaluation
+                  </button>
+                </span>
+              )}
+              {(evaluation?.overallOutcome === "PASS" || evaluation?.overallOutcome === "APPROVED") && (
                 <>
                   <CheckCircle2 size={16} />
-                  <span>Policy Compliance: PASS — All rules satisfied.</span>
+                  <span>Policy Compliance: APPROVED — All mandatory checks passed.</span>
                 </>
               )}
-              {evaluation.overallOutcome === "CONDITIONAL" && (
+              {evaluation?.overallOutcome === "CONDITIONAL" && (
                 <>
                   <AlertTriangle size={16} />
                   <span>
@@ -149,18 +180,24 @@ export default function DecisionModal({
                   </span>
                 </>
               )}
-              {evaluation.overallOutcome === "BLOCK" && (
+              {(evaluation?.overallOutcome === "BLOCK" || evaluation?.overallOutcome === "BLOCKED") && (
                 <>
                   <ShieldAlert size={16} />
                   <span>
-                    Policy Compliance: BLOCK — Critical violations prevent normal release.
+                    Policy Compliance: BLOCKED — A mandatory rule prevents release.
                   </span>
+                </>
+              )}
+              {evaluation?.overallOutcome === "QUARANTINED" && (
+                <>
+                  <AlertTriangle size={16} />
+                  <span>Policy Compliance: QUARANTINED — Required evidence or review is incomplete.</span>
                 </>
               )}
             </div>
 
             <div style={{ fontSize: 11, color: "#64748b" }}>
-              {evaluation.ruleEvaluations.map((r) => (
+              {(evaluation?.ruleEvaluations || []).map((r) => (
                 <div
                   key={r.ruleCode}
                   style={{
@@ -245,8 +282,8 @@ export default function DecisionModal({
             <div className="form-error" style={{ background: "#fff1f1", borderColor: "#fca5a5" }}>
               <ShieldAlert size={16} color="#dc2626" />
               <span>
-                <strong>Warning:</strong> The policy recommends BLOCKING this artifact due to
-                critical findings or integrity violations. Approving will record an official override.
+                <strong>Approval unavailable:</strong> The current policy outcome is {policyOutcome}.
+                Resolve its requirements and reevaluate before approval.
               </span>
             </div>
           )}
@@ -312,7 +349,7 @@ export default function DecisionModal({
           <button
             className="btn primary"
             onClick={handleConfirm}
-            disabled={loading || !rationale.trim()}
+            disabled={loading || !rationale.trim() || isApprovingBlocked}
           >
             {loading ? "Recording Decision..." : "Commit Decision"}
           </button>

@@ -40,7 +40,8 @@ def initialize():
                 id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL REFERENCES artifacts(id),
                 status TEXT NOT NULL, progress INTEGER NOT NULL,
                 created_at TEXT NOT NULL, completed_at TEXT,
-                error TEXT, observed_hash TEXT
+                error TEXT, observed_hash TEXT,
+                modelaudit_status TEXT NOT NULL DEFAULT 'UNKNOWN', modelaudit_error TEXT
             );
             CREATE INDEX IF NOT EXISTS scans_artifact_time ON scans(artifact_id, created_at DESC);
             CREATE TABLE IF NOT EXISTS findings (
@@ -66,9 +67,16 @@ def initialize():
                 reviewer_name TEXT NOT NULL, reviewer_role TEXT NOT NULL,
                 decision TEXT NOT NULL, rationale TEXT NOT NULL,
                 conditions TEXT, valid_until TEXT, created_at TEXT NOT NULL,
-                signature TEXT NOT NULL
+                signature TEXT NOT NULL, evaluation_id TEXT, policy_version TEXT, artifact_hash TEXT
             );
             CREATE INDEX IF NOT EXISTS decisions_artifact ON decisions(artifact_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS policy_evaluations (
+                id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+                artifact_hash TEXT, policy_id TEXT NOT NULL, policy_code TEXT NOT NULL,
+                policy_version TEXT NOT NULL, policy_snapshot TEXT NOT NULL,
+                result_payload TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS evaluations_artifact ON policy_evaluations(artifact_id, created_at DESC);
             CREATE TABLE IF NOT EXISTS audit_logs (
                 id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
                 user_name TEXT NOT NULL, user_role TEXT NOT NULL,
@@ -85,6 +93,15 @@ def initialize():
         for column in ('publisher', 'repository', 'revision', 'origin'):
             if column not in columns:
                 db.execute(f'ALTER TABLE artifacts ADD COLUMN {column} TEXT')
+        decision_columns = {row['name'] for row in db.execute('PRAGMA table_info(decisions)')}
+        for column in ('evaluation_id', 'policy_version', 'artifact_hash'):
+            if column not in decision_columns:
+                db.execute(f'ALTER TABLE decisions ADD COLUMN {column} TEXT')
+        scan_columns = {row['name'] for row in db.execute('PRAGMA table_info(scans)')}
+        if 'modelaudit_status' not in scan_columns:
+            db.execute("ALTER TABLE scans ADD COLUMN modelaudit_status TEXT NOT NULL DEFAULT 'UNKNOWN'")
+        if 'modelaudit_error' not in scan_columns:
+            db.execute('ALTER TABLE scans ADD COLUMN modelaudit_error TEXT')
 
         # Seed standard release policies if table is empty
         policy_count = db.execute('SELECT COUNT(*) FROM policies').fetchone()[0]

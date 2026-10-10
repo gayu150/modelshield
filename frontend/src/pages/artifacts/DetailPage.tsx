@@ -2,10 +2,11 @@ import { useState } from "react";
 import {
   Award,
   ChevronLeft,
-  FileCheck,
   FileCode2,
   FileText,
   Fingerprint,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import type { Artifact } from "../../types/artifact";
 import type { SecurityPassport } from "../../types/governance";
@@ -13,12 +14,15 @@ import { artifactUrl, go, type SecurityTab } from "../../routes";
 import { Heading, Status } from "../../components/common/Registry";
 import SecurityAnalysis from "../security/SecurityAnalysis";
 import ScanControl from "../../components/artifacts/ScanControl";
-import DecisionModal from "../../components/governance/DecisionModal";
 import PassportView from "../../components/governance/PassportView";
 import { useResource } from "../../hooks/useResource";
 import { DEMO_MODE } from "../../config";
 import { generateMockPassport } from "../../data/governance";
-import { getSecurityPassport } from "../../services/api/governance";
+import { getSecurityPassport, replayArtifactDecision } from "../../services/api/governance";
+import { evaluateArtifactAgainstPolicy, standardPolicies } from "../../data/governance";
+import { example } from "../../data/security";
+import type { PolicyEvaluation } from "../../types/governance";
+import { safeMessage } from "../../services/api/client";
 import { EmptyState, ErrorState, Loading } from "../../components/common/Feedback";
 import "./workflow.css";
 
@@ -27,14 +31,20 @@ export default function DetailPage({
   tab,
   revision,
   onRefresh,
+  onDelete,
 }: {
   item: Artifact;
   tab?: SecurityTab;
   revision: number;
   onRefresh: () => void;
+  onDelete: () => Promise<void>;
 }) {
   const [copied, setCopied] = useState("");
-  const [showDecisionModal, setShowDecisionModal] = useState(tab === "decision");
+  const [replay, setReplay] = useState<{ id: string; original: string; evaluation: PolicyEvaluation }>();
+  const [replayError, setReplayError] = useState("");
+  const [replayBusy, setReplayBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const passportResource = useResource<SecurityPassport | undefined>(
     (signal) =>
@@ -63,6 +73,40 @@ export default function DetailPage({
       setCopied("Hash copied.");
     } catch {
       setCopied("Clipboard unavailable. Select and copy the hash below.");
+    }
+  }
+
+  async function runReplay() {
+    setReplayBusy(true);
+    setReplayError("");
+    try {
+      if (DEMO_MODE) {
+        setReplay({
+          id: "RPL-DEMO-" + crypto.randomUUID().slice(0, 8).toUpperCase(),
+          original: item.decision,
+          evaluation: evaluateArtifactAgainstPolicy(item, standardPolicies[0], example(item).findings, item.provenance?.observedHash),
+        });
+      } else {
+        const result = await replayArtifactDecision(item.id);
+        setReplay({ id: result.replayId, original: result.originalDecision, evaluation: result.evaluation });
+      }
+    } catch (error) {
+      setReplayError(safeMessage(error));
+    } finally {
+      setReplayBusy(false);
+    }
+  }
+
+  async function removeArtifact() {
+    if (!window.confirm(`Delete “${item.name}” and its scan, findings, evidence, and decisions? This cannot be undone.`)) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await onDelete();
+    } catch (error) {
+      setDeleteError(safeMessage(error));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -103,13 +147,6 @@ export default function DetailPage({
         desc={"Version " + item.version + " - Added " + item.uploadedAt}
         action={
           <div style={{ display: "flex", gap: 8 }}>
-            <button
-              className="btn primary"
-              onClick={() => setShowDecisionModal(true)}
-            >
-              <FileCheck size={14} />
-              Record Decision
-            </button>
             <a
               className="btn outline"
               href={"#" + artifactUrl(item.id, "passport")}
@@ -121,9 +158,18 @@ export default function DetailPage({
               <FileText size={14} />
               Print record
             </button>
+            <button className="btn outline" onClick={runReplay} disabled={replayBusy || item.scanStatus !== "COMPLETED"}>
+              <RotateCcw size={14} />
+              {replayBusy ? "Replaying..." : "Replay decision"}
+            </button>
+            <button className="btn outline" onClick={removeArtifact} disabled={deleting} style={{ color: "#b42318", borderColor: "#f0b6b2" }}>
+              <Trash2 size={14} />
+              {deleting ? "Deleting..." : "Delete artifact"}
+            </button>
           </div>
         }
       />
+      {deleteError && <p className="form-error" role="alert">{deleteError}</p>}
 
       <section className="detail-banner">
         <div className="artifact-cell">
@@ -156,12 +202,16 @@ export default function DetailPage({
 
       {item.decision === "QUARANTINED" && (
         <p className="quarantine-explanation" role="status">
-          Automatically marked QUARANTINED on upload. Review security evidence and evaluate against release policies to record an authorized approval decision.
+          {item.reviewRequired
+            ? `The policy assessment proposed ${item.policyOutcome || "a non-pass outcome"}. This artifact remains quarantined until a reviewer records an authorized decision.`
+            : item.scanStatus === "COMPLETED"
+              ? "The scan is complete. The artifact remains quarantined because it requires an explicit governance disposition."
+              : "Quarantined on upload. Run the security scan to collect integrity, provenance, and finding evidence before policy evaluation."}
         </p>
       )}
 
       <section className="detail-card">
-        <h2>Artifact information & Governance</h2>
+        <h2>Artifact details & policy evaluation</h2>
         <div className="overview">
           <span>
             MODEL VERSION<b>{item.version}</b>
@@ -178,7 +228,7 @@ export default function DetailPage({
         </div>
 
         <p>
-          Inspect scanner evidence, evaluated policies, and generate an official security passport.
+          Review scan evidence and policy results. Policy-passing artifacts may be approved automatically; other outcomes remain restricted for human review.
         </p>
 
         <div className="security-links">
@@ -202,22 +252,30 @@ export default function DetailPage({
 
       <ScanControl key={item.id} artifactId={item.id} onCompleted={onRefresh} />
 
+      {(replay || replayError || item.scanStatus !== "COMPLETED") && (
+        <section className="detail-card decision-replay">
+          <h2>Decision replay</h2>
+          <p>Re-evaluate the stored scan evidence against the active policy. Replay is recorded separately and does not change the original decision.</p>
+          {item.scanStatus !== "COMPLETED" && <p>Complete a scan before replaying a decision.</p>}
+          {replayError && <p className="form-error" role="alert">{replayError}</p>}
+          {replay && <>
+            <div className="overview">
+              <span>REPLAY ID<b>{replay.id}</b></span>
+              <span>ORIGINAL DECISION<b>{replay.original}</b></span>
+              <span>POLICY VERSION<b>{replay.evaluation.policyCode} · {replay.evaluation.policyVersion}</b></span>
+              <span>REPLAY OUTCOME<b>{replay.evaluation.overallOutcome}</b></span>
+            </div>
+            <ul>{replay.evaluation.ruleEvaluations.map((rule) => <li key={rule.ruleCode}>{rule.passed ? "Passed" : rule.action}: {rule.ruleTitle} — {rule.reason}</li>)}</ul>
+          </>}
+        </section>
+      )}
+
       <SecurityAnalysis
         key={item.id + ":" + revision}
         artifact={item}
-        tab={tab === "decision" ? "findings" : tab || "findings"}
+        tab={tab || "findings"}
       />
 
-      {showDecisionModal && (
-        <DecisionModal
-          artifact={item}
-          onClose={() => setShowDecisionModal(false)}
-          onSuccess={() => {
-            setShowDecisionModal(false);
-            onRefresh();
-          }}
-        />
-      )}
     </>
   );
 }

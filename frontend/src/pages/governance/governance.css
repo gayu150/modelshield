@@ -1,4 +1,4 @@
-/* ModelShield Member 3: Governance, Policies, Decision & Passport styles */
+/* ModelShield governance, policies, decisions, and passport styles */
 
 .governance-hero {
   display: flex;
@@ -50,7 +50,7 @@
 }
 
 .policy-card-full {
-  background: #ffffff;
+  background: #321494;
   border: 1px solid #e1e7ef;
   border-radius: 14px;
   padding: 20px;
@@ -86,36 +86,36 @@
 }
 
 .policy-tag.active {
-  background: #eaf7f0;
-  color: #12825d;
+  background: #4875b4;
+  color: #e1e0e4;
 }
 
 .policy-tag.draft {
   background: #fff6e5;
-  color: #b77908;
+  color: #704d0c;
 }
 
 .policy-tag.deprecated {
   background: #fdecec;
-  color: #dc2626;
+  color: #793434;
 }
 
 .policy-card-title {
   font-size: 16px;
   font-weight: 700;
-  color: #142235;
+  color: #d8e2f0;
   margin: 4px 0 2px;
 }
 
 .policy-code-badge {
   font-size: 11px;
   font-family: monospace;
-  color: #627284;
+  color: #3c7ec9;
 }
 
 .policy-card-desc {
   font-size: 13px;
-  color: #556579;
+  color: #839bb9;
   line-height: 1.5;
   margin: 0;
 }
@@ -124,7 +124,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border-top: 1px solid #edf0f5;
+  border-top: 1px solid #15489f;
   padding-top: 14px;
 }
 
@@ -132,8 +132,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #f8fafc;
-  border: 1px solid #e9edf3;
+  background: #f8fafcf0;
+  border: 1px solid #164488;
   padding: 10px 12px;
   border-radius: 8px;
   font-size: 12px;
@@ -146,7 +146,7 @@
 }
 
 .rule-left b {
-  color: #243447;
+  color: #5e93d4;
 }
 
 .rule-left small {
@@ -163,13 +163,13 @@
 }
 
 .rule-action-badge.block {
-  background: #fee2e2;
-  color: #991b1b;
+  background: #2d30ca;
+  color: #a3add1;
 }
 
 .rule-action-badge.warn {
-  background: #fef3c7;
-  color: #92400e;
+  background: #2d30ca;
+  color: #a3add1;
 }
 
 .rule-action-badge.allow {
@@ -197,7 +197,7 @@
 .audit-item {
   position: relative;
   background: #ffffff;
-  border: 1px solid #e5eaf0;
+  border: 1px solid #114a90;
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
@@ -232,20 +232,20 @@
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 4px;
-  background: #f1f5f9;
-  color: #334155;
+  background: #2476c8;
+  color: #d9dde2;
   letter-spacing: 0.5px;
 }
 
 .audit-time {
   font-size: 11px;
-  color: #8b9aa9;
+  color: #186abc;
 }
 
 .audit-desc {
   font-size: 13px;
   font-weight: 600;
-  color: #172536;
+  color: #1e5ba4;
   margin-bottom: 8px;
 }
 
@@ -258,7 +258,7 @@
 }
 
 .audit-actor-row b {
-  color: #172536;
+  color: #2260ab;
 }
 
 .audit-details-box {
@@ -269,7 +269,7 @@
   padding: 8px 12px;
   font-family: monospace;
   font-size: 11px;
-  color: #475569;
+  color: #1f66c9;
   word-break: break-all;
 }
 
@@ -404,6 +404,25 @@
 .compliance-status-banner.block {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.compliance-status-banner.blocked {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.compliance-status-banner.quarantined,
+.compliance-status-banner.pending {
+  background: #eef2f7;
+  color: #46566b;
+}
+
+.evaluation-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
 }
 
 .modal-foot {

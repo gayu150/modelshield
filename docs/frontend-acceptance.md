@@ -1,6 +1,6 @@
-# ModelShield Acceptance — Members 1, 2, and 3 Complete Integration
+# ModelShield Workflow Acceptance
 
-Scope: Full end-to-end pipeline covering Authentication, Artifact Intake, Security Analysis & Evidence, Release Policies, Review Queue, Decision Engine, Model Security Passport, and Audit Trail.
+Scope: End-to-end pipeline covering authentication, artifact intake, security analysis and evidence, policy evaluation, conditional human review, final decisions, Model Security Passport, and Audit Trail.
 
 ## Completed automated checks
 
@@ -20,14 +20,11 @@ npx --yes tsx@4.20.6 --test tests/render.test.tsx
 ```
 
 ## End-to-End Pipeline
-$$\text{Upload (M1)} \to \text{Artifact (M1)} \to \text{Scan (M1)} \to \text{Findings (M2)} \to \text{Evidence (M2)} \to \mathbf{\text{Policy (M3)}} \to \mathbf{\text{Decision (M3)}} \to \mathbf{\text{Passport (M3)}} \to \mathbf{\text{Audit (M3)}}$$
+$$\text{Upload} \to \text{Quarantine} \to \text{Scan} \to \text{Findings + Evidence} \to \text{Policy Evaluation} \to \text{Human Review if Needed} \to \text{Final Decision} \to \text{Passport} \to \text{Audit}$$
 
-1. **Member 1**: Upload a model file (.onnx, .pkl, .pt, .safetensors, .h5). Automatically quarantined and hashed (SHA-256).
-2. **Member 2**: Run security scan. Structural and ModelAudit checks generate findings, evidence, evidence graph, provenance, and risk summary.
-3. **Member 3**:
-   - **Review Queue**: Triage quarantined and conditional models with live search, filters, and quick action buttons.
-   - **Release Policies**: Evaluate against configured policies (e.g., `PROD-SEC-004`, `DEV-SANDBOX-001`, `FIN-COMPLY-009`) with zero tolerance for critical vulnerabilities and hash mismatches.
-   - **Decision Engine**: Security reviewers commit decisions (`APPROVED`, `CONDITIONAL`, `QUARANTINED`, `BLOCKED`) with required justification and caveats.
-   - **Model Security Passport**: Cryptographically signed release attestation with JSON export and printable certificate.
-   - **Audit Trail**: Immutable chronological activity log across all user and workspace events.
-   - **Evidence Graph**: Policy and decision nodes connected into the artifact evidence graph.
+1. Upload a supported model file. The application quarantines it and records a SHA-256 fingerprint.
+2. Opening an unscanned artifact starts the security scan automatically. Structural and ModelAudit checks generate findings and evidence.
+3. The active policy records rule-level results and a proposed outcome. A passing outcome may approve automatically; an outcome requiring judgment leaves the artifact quarantined.
+4. The **Review Queue** distinguishes artifacts awaiting a scan from artifacts requiring review. Reviewers inspect the record and enter a rationale before recording the final disposition.
+5. The **Model Security Passport** summarizes recorded evidence and the final decision. The **Audit Trail** records policy evaluations and decisions.
+6. Demo mode uses illustrative fixtures and does not scan uploaded model bytes.

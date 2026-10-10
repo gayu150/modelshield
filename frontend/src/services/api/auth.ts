@@ -21,6 +21,13 @@ export async function login(email: string, password: string) {
   });
   return currentUser();
 }
+export async function register(name: string, email: string, password: string) {
+  await api("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ name, email, password }),
+  });
+  return currentUser();
+}
 export async function logout() {
   await api("/auth/logout", { method: "POST" });
   document.querySelector('meta[name="csrf-token"]')?.remove();

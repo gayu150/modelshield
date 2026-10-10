@@ -89,7 +89,7 @@ export default function UploadPage({
       <Heading
         tag="ARTIFACT INTAKE"
         title="Upload a model"
-        desc="Upload a model file. ModelShield automatically marks it QUARANTINED and records its SHA-256 hash. You can start a scan on the next page."
+        desc="Upload a model file. ModelShield validates it, records its SHA-256 hash, and quarantines it before scanning and policy evaluation."
       />
       <form className="upload-grid" onSubmit={submit}>
         <section className="upload-form">
@@ -206,12 +206,12 @@ export default function UploadPage({
           <p>
             {DEMO_MODE
               ? "A temporary demo record is created. No file bytes leave your computer and no scan runs."
-              : "After upload, the file is saved with QUARANTINED status and its SHA-256 hash is recorded. There is no separate quarantine step."}
+              : "After upload, ModelShield hashes and quarantines the file. Policy checks can approve a passing artifact; outcomes that need judgment stay quarantined for human review."}
           </p>
           <ol className="intake-steps">
             <li>Upload the model file.</li>
-            <li>Check its quarantined status and hash.</li>
-            <li>Choose Start scan to generate findings and evidence.</li>
+            <li>{DEMO_MODE ? "Explore illustrative sample outcomes." : "Review the generated scan evidence."}</li>
+            <li>{DEMO_MODE ? "Demo records show illustrative policy and review states." : "A reviewer records a reasoned disposition for flagged outcomes."}</li>
           </ol>
         </aside>
       </form>

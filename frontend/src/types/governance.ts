@@ -1,15 +1,22 @@
 import type { Artifact, Decision } from "./artifact";
 
-export type RuleSeverity = "BLOCK" | "WARN" | "ALLOW";
+export type RuleSeverity = "BLOCK" | "QUARANTINE" | "WARN" | "CONDITIONAL" | "ALLOW";
 
 export type PolicyRuleTrigger =
   | "CRITICAL"
   | "HIGH"
   | "MEDIUM"
+  | "LOW"
+  | "INFO"
   | "ANY_FINDING"
   | "HASH_MISMATCH"
   | "UNVERIFIED_PROVENANCE"
-  | "UNVERIFIED_SIGNATURE";
+  | "UNVERIFIED_SIGNATURE"
+  | "INVALID_SIGNATURE"
+  | "CONFIRMED_MALICIOUS"
+  | "SCAN_FAILED"
+  | "SCAN_INCOMPLETE"
+  | "UNSUPPORTED_FORMAT";
 
 export type PolicyRule = {
   id: string;
@@ -42,13 +49,18 @@ export type RuleEvaluation = {
 };
 
 export type PolicyEvaluation = {
+  evaluationId?: string;
+  artifactId?: string;
   policyId: string;
   policyCode: string;
   policyName: string;
   policyVersion: string;
-  overallOutcome: "PASS" | "CONDITIONAL" | "BLOCK";
+  overallOutcome: "APPROVED" | "CONDITIONAL" | "QUARANTINED" | "BLOCKED" | "PASS" | "BLOCK";
   ruleEvaluations: RuleEvaluation[];
   evaluatedAt: string;
+  unknownSignals?: string[];
+  requiresHumanReview?: boolean;
+  evidenceReferences?: string[];
 };
 
 export type DecisionRecord = {
@@ -69,7 +81,7 @@ export type SecurityPassport = {
   passportId: string;
   passportNumber: string;
   issuedAt: string;
-  status: "VALID" | "REVOKED" | "EXPIRED";
+  status: "VALID" | "CONDITIONAL" | "PENDING" | "REVOKED" | "EXPIRED";
   artifact: {
     id: string;
     name: string;
@@ -113,10 +125,12 @@ export type SecurityPassport = {
 
 export type AuditEventType =
   | "ARTIFACT_UPLOAD"
+  | "ARTIFACT_DELETED"
   | "SCAN_STARTED"
   | "SCAN_COMPLETED"
   | "POLICY_EVALUATION"
   | "DECISION_RECORDED"
+  | "DECISION_REPLAY"
   | "PASSPORT_GENERATED"
   | "USER_LOGIN"
   | "USER_LOGOUT";

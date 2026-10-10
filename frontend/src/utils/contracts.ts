@@ -111,6 +111,9 @@ export function parseArtifact(value: unknown): Artifact {
     ]),
     findings: v.findings,
     provenance: parseProvenance(v.provenance),
+    ...(v.scanStatus === undefined ? {} : { scanStatus: enumValue(v.scanStatus, ["NOT_SCANNED", "QUEUED", "RUNNING", "COMPLETED", "FAILED"] as const) }),
+    ...(v.policyOutcome === undefined || v.policyOutcome === null ? {} : { policyOutcome: enumValue(v.policyOutcome, ["APPROVED", "CONDITIONAL", "QUARANTINED", "BLOCKED", "PASS", "BLOCK"] as const) }),
+    ...(v.reviewRequired === undefined ? {} : { reviewRequired: v.reviewRequired === true }),
   };
 }
 export const parseArtifacts = (value: unknown) =>
@@ -203,6 +206,8 @@ export type Scan = {
   status: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
   progress?: number;
   error?: string;
+  modelAuditStatus?: "UNKNOWN" | "RUNNING" | "COMPLETED" | "FAILED";
+  modelAuditError?: string;
 };
 export function parseScan(value: unknown): Scan {
   const v = record(value);
@@ -221,6 +226,8 @@ export function parseScan(value: unknown): Scan {
     result.progress = v.progress;
   }
   if (v.error != null) result.error = text(v.error);
+  if (v.modelAuditStatus != null) result.modelAuditStatus = enumValue(v.modelAuditStatus, ["UNKNOWN", "RUNNING", "COMPLETED", "FAILED"] as const);
+  if (v.modelAuditError != null) result.modelAuditError = text(v.modelAuditError);
   return result;
 }
 
@@ -235,12 +242,19 @@ export function parsePolicyRule(value: unknown): PolicyRule {
       "CRITICAL",
       "HIGH",
       "MEDIUM",
+      "LOW",
+      "INFO",
       "ANY_FINDING",
       "HASH_MISMATCH",
       "UNVERIFIED_PROVENANCE",
       "UNVERIFIED_SIGNATURE",
+      "INVALID_SIGNATURE",
+      "CONFIRMED_MALICIOUS",
+      "SCAN_FAILED",
+      "SCAN_INCOMPLETE",
+      "UNSUPPORTED_FORMAT",
     ]),
-    action: enumValue(v.action, ["BLOCK", "WARN", "ALLOW"]),
+    action: enumValue(v.action, ["BLOCK", "QUARANTINE", "WARN", "CONDITIONAL", "ALLOW"]),
     enabled: typeof v.enabled === "boolean" ? v.enabled : true,
   };
 }
@@ -269,7 +283,7 @@ export function parseRuleEvaluation(value: unknown): RuleEvaluation {
     ruleCode: text(v.ruleCode),
     ruleTitle: text(v.ruleTitle),
     passed: Boolean(v.passed),
-    action: enumValue(v.action, ["BLOCK", "WARN", "ALLOW"]),
+    action: enumValue(v.action, ["BLOCK", "QUARANTINE", "WARN", "CONDITIONAL", "ALLOW"]),
     reason: text(v.reason),
   };
 }
@@ -277,17 +291,25 @@ export function parseRuleEvaluation(value: unknown): RuleEvaluation {
 export function parsePolicyEvaluation(value: unknown): PolicyEvaluation {
   const v = record(value);
   return {
+    ...(v.evaluationId == null ? {} : { evaluationId: identifier(v.evaluationId) }),
+    ...(v.artifactId == null ? {} : { artifactId: identifier(v.artifactId) }),
     policyId: identifier(v.policyId),
     policyCode: text(v.policyCode),
     policyName: text(v.policyName),
     policyVersion: text(v.policyVersion),
     overallOutcome: enumValue(v.overallOutcome, [
+      "APPROVED",
+      "QUARANTINED",
+      "BLOCKED",
       "PASS",
       "CONDITIONAL",
       "BLOCK",
     ]),
     ruleEvaluations: array(v.ruleEvaluations, parseRuleEvaluation),
     evaluatedAt: text(v.evaluatedAt),
+    ...(v.unknownSignals == null ? {} : { unknownSignals: array(v.unknownSignals, text) }),
+    ...(v.requiresHumanReview == null ? {} : { requiresHumanReview: v.requiresHumanReview === true }),
+    ...(v.evidenceReferences == null ? {} : { evidenceReferences: array(v.evidenceReferences, text) }),
   };
 }
 
@@ -329,7 +351,7 @@ export function parseSecurityPassport(value: unknown): SecurityPassport {
     passportId: identifier(v.passportId),
     passportNumber: text(v.passportNumber),
     issuedAt: text(v.issuedAt),
-    status: enumValue(v.status, ["VALID", "REVOKED", "EXPIRED"]),
+    status: enumValue(v.status, ["VALID", "CONDITIONAL", "PENDING", "REVOKED", "EXPIRED"]),
     artifact: {
       id: identifier(art.id),
       name: text(art.name),
@@ -384,10 +406,12 @@ export function parseAuditEntry(value: unknown): AuditEntry {
     timestamp,
     eventType: enumValue(v.eventType, [
       "ARTIFACT_UPLOAD",
+      "ARTIFACT_DELETED",
       "SCAN_STARTED",
       "SCAN_COMPLETED",
       "POLICY_EVALUATION",
       "DECISION_RECORDED",
+      "DECISION_REPLAY",
       "PASSPORT_GENERATED",
       "USER_LOGIN",
       "USER_LOGOUT",

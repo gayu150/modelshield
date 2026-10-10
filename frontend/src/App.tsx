@@ -3,16 +3,20 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import Layout from "./components/common/Layout";
 import { Loading, ErrorState, EmptyState } from "./components/common/Feedback";
 import { DEMO_MODE } from "./config";
+import { example } from "./data/security";
 import { sample } from "./data/artifacts";
+import { evaluateArtifactAgainstPolicy, standardPolicies } from "./data/governance";
 import { useResource } from "./hooks/useResource";
 import { artifactUrl, go, readRoute, type Route } from "./routes";
 import {
   getArtifact,
   listArtifacts,
   uploadArtifact,
+  deleteArtifact,
   type ArtifactUpload,
 } from "./services/api/artifacts";
 import type { Artifact } from "./types/artifact";
+import type { DecisionRecord } from "./types/governance";
 import LoginPage from "./pages/auth/LoginPage";
 import Dashboard from "./pages/dashboard/Dashboard";
 import ArtifactPage from "./pages/artifacts/ArtifactPage";
@@ -25,10 +29,12 @@ function ArtifactRecord({
   route,
   items,
   onRefresh,
+  onDelete,
 }: {
   route: Route;
   items: Artifact[];
   onRefresh: () => void;
+  onDelete: (id: string) => Promise<void>;
 }) {
   const [revision, setRevision] = useState(0);
   const resource = useResource(
@@ -57,13 +63,37 @@ function ArtifactRecord({
         setRevision((x) => x + 1);
         onRefresh();
       }}
+      onDelete={() => onDelete(route.id!)}
     />
   );
 }
+
+function demoPolicyOutcomes(items: Artifact[]): Artifact[] {
+  return items.map((item) => {
+    const evaluation = evaluateArtifactAgainstPolicy(
+      item,
+      standardPolicies[0],
+      example(item).findings,
+      item.provenance?.observedHash,
+    );
+    const decision: Artifact["decision"] = ["PASS", "APPROVED"].includes(evaluation.overallOutcome)
+      ? "APPROVED"
+      : ["BLOCK", "BLOCKED"].includes(evaluation.overallOutcome) ? "BLOCKED"
+        : evaluation.overallOutcome === "CONDITIONAL" ? "CONDITIONAL" : "QUARANTINED";
+    return {
+      ...item,
+      decision,
+      scanStatus: "COMPLETED",
+      policyOutcome: evaluation.overallOutcome,
+      reviewRequired: !["PASS", "APPROVED"].includes(evaluation.overallOutcome),
+    };
+  });
+}
+
 function Workspace() {
   const { user } = useAuth();
   const [route, setRoute] = useState<Route>(readRoute);
-  const [demoItems, setDemoItems] = useState<Artifact[]>(sample);
+  const [demoItems, setDemoItems] = useState<Artifact[]>(() => demoPolicyOutcomes(sample));
   const [notice, setNotice] = useState("");
   const [revision, setRevision] = useState(0);
   const registry = useResource(
@@ -99,6 +129,8 @@ function Workspace() {
           uploadedBy: user!.name,
           uploadedAt: new Date().toISOString(),
           decision: "QUARANTINED" as const,
+          scanStatus: "NOT_SCANNED" as const,
+          reviewRequired: false,
           findings: 0,
           hash: "Pending verification",
           provenance: { source: input.source },
@@ -109,9 +141,18 @@ function Workspace() {
     setNotice(
       DEMO_MODE
         ? "Demo quarantine record created. No model bytes were uploaded."
-        : "Upload complete. The model is automatically marked QUARANTINED and hashed. Choose Start scan to generate security evidence.",
+        : "Upload complete. The model is hashed and quarantined. Policy passing may auto-approve it; flagged outcomes remain quarantined for reviewer disposition.",
     );
     go(artifactUrl(item.id));
+  }
+  async function removeArtifact(id: string) {
+    if (DEMO_MODE) setDemoItems((previous) => previous.filter((item) => item.id !== id));
+    else {
+      await deleteArtifact(id);
+      setRevision((x) => x + 1);
+    }
+    setNotice("Artifact and its scan records were deleted. The audit event was retained.");
+    go("/artifacts");
   }
   const registryPage = ["dashboard", "artifacts"].includes(route.page);
   return (
@@ -143,23 +184,21 @@ function Workspace() {
           route={route}
           items={items.length ? items : demoItems}
           onRefresh={() => setRevision((x) => x + 1)}
+          onDelete={removeArtifact}
         />
       )}
       {route.page === "review-queue" && (
         <ReviewQueuePage
-          items={items.length ? items : demoItems}
+          items={DEMO_MODE ? demoItems : items}
           onOpen={(id) => go(artifactUrl(id))}
-          onDecisionUpdated={(rec) => {
+          onDecision={(id, record: DecisionRecord) => {
             if (DEMO_MODE) {
-              setDemoItems((prev) =>
-                prev.map((it) =>
-                  it.id === rec.artifactId ? { ...it, decision: rec.decision } : it,
-                ),
-              );
+              setDemoItems((previous) => previous.map((item) => item.id === id
+                ? { ...item, decision: record.decision, reviewRequired: false }
+                : item));
             } else {
               setRevision((x) => x + 1);
             }
-            setNotice(`Decision recorded: ${rec.decision} for artifact.`);
           }}
         />
       )}
@@ -187,7 +226,7 @@ function Session() {
   if (auth.loading) return <Loading>Checking your session...</Loading>;
   if (auth.error)
     return <ErrorState message={auth.error} onRetry={auth.retry} />;
-  if (!auth.user) return <LoginPage onLogin={auth.signIn} />;
+  if (!auth.user) return <LoginPage onLogin={auth.signIn} onSignUp={auth.signUp} />;
   return <Workspace key={auth.user.id} />;
 }
 export default function App() {

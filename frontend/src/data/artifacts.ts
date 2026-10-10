@@ -10,6 +10,10 @@ export const sample: Artifact[] = [
     uploadedAt: "Today, 10:24 AM",
     decision: "QUARANTINED",
     findings: 0,
+    provenance: {
+      source: "ModelShield example registry",
+      verificationStatus: "VERIFIED",
+    },
     hash: "a81f93c4d69b…a2d29b",
   },
   {

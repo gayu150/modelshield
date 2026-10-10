@@ -3,8 +3,7 @@ export type SecurityTab =
   | "evidence"
   | "graph"
   | "provenance"
-  | "passport"
-  | "decision";
+  | "passport";
 export type Route = {
   page:
     | "dashboard"
@@ -44,7 +43,6 @@ export function parseRoute(hash: string): Route {
         "graph",
         "provenance",
         "passport",
-        "decision",
       ].includes(tab)
     )
       return { page: "security", id, tab: tab as SecurityTab };

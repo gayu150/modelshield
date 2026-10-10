@@ -10,5 +10,8 @@ export type Artifact = {
   decision: Decision;
   findings: number;
   hash: string;
+  scanStatus?: "NOT_SCANNED" | "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+  policyOutcome?: "APPROVED" | "CONDITIONAL" | "QUARANTINED" | "BLOCKED" | "PASS" | "BLOCK";
+  reviewRequired?: boolean;
   provenance?: import("./security").Provenance;
 };

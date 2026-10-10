@@ -4,10 +4,12 @@ import json
 import os
 import pickle
 import socket
+import struct
 import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 import urllib.error
 import urllib.request
 import uuid
@@ -17,6 +19,7 @@ os.environ['MODELSHIELD_DATA_DIR'] = TEMP.name
 
 import uvicorn  # noqa: E402
 from backend.main import app  # noqa: E402
+from backend.modelaudit_adapter import ScannerUnavailable  # noqa: E402
 from backend.store import connect, password_hash  # noqa: E402
 
 
@@ -118,7 +121,7 @@ class APITest(unittest.TestCase):
                 break
             time.sleep(0.05)
         self.assertEqual(state, 'COMPLETED')
-        self.assertEqual(first.request('GET', '/artifacts/' + artifact_id)[1]['decision'], 'QUARANTINED')
+        self.assertEqual(first.request('GET', '/artifacts/' + artifact_id)[1]['decision'], 'BLOCKED')
         findings = first.request('GET', '/artifacts/' + artifact_id + '/findings')[1]
         self.assertTrue(any(item['severity'] == 'HIGH' for item in findings))
         self.assertTrue(any(item['scanner'] == 'ModelAudit' and item['severity'] == 'CRITICAL'
@@ -157,6 +160,32 @@ class APITest(unittest.TestCase):
                                        {'Content-Type': 'application/json'})
         self.assertEqual(status, 422)
         self.assertNotIn('private-value', json.dumps(error))
+
+    def test_modelaudit_failure_preserves_structural_scan_and_quarantines(self):
+        client = Client(self.base)
+        client.login('first@example.test')
+        header = b'{"weight":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}'
+        artifact_bytes = struct.pack('<Q', len(header)) + header + b'\x00' * 4
+        body, headers = multipart('partial-scan.safetensors', artifact_bytes)
+        status, artifact = client.request('POST', '/artifacts', body, headers)
+        self.assertEqual(status, 201)
+
+        with patch('backend.main.modelaudit_scan', side_effect=ScannerUnavailable(
+            'ModelAudit failed or returned no bounded report.')):
+            status, scan = client.request('POST', f"/artifacts/{artifact['id']}/scan")
+            self.assertEqual(status, 202)
+            for _ in range(100):
+                scan_result = client.request('GET', f"/scans/{scan['scan_id']}")[1]
+                if scan_result['status'] in ('COMPLETED', 'FAILED'):
+                    break
+                time.sleep(0.05)
+
+        self.assertEqual(scan_result['status'], 'COMPLETED')
+        self.assertEqual(scan_result['modelAuditStatus'], 'FAILED')
+        self.assertIn('bounded report', scan_result['modelAuditError'])
+        findings = client.request('GET', f"/artifacts/{artifact['id']}/findings")[1]
+        self.assertTrue(any('structural' in finding['scanner'].lower() for finding in findings))
+        self.assertEqual(client.request('GET', f"/artifacts/{artifact['id']}")[1]['decision'], 'QUARANTINED')
 
     def test_login_rate_limit_and_expired_session(self):
         client = Client(self.base)

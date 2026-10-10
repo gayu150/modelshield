@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   Check,
@@ -32,6 +32,10 @@ export default function GovernancePage({
   const [expandedPolicyId, setExpandedPolicyId] = useState<string>("POL-PROD-004");
   const [auditFilter, setAuditFilter] = useState<string>("ALL");
   const [selectedAuditItem, setSelectedAuditItem] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveTab(section);
+  }, [section]);
 
   const policiesResource = useResource<ReleasePolicy[]>(
     (signal) =>
@@ -74,8 +78,8 @@ export default function GovernancePage({
             {activeTab === "policies"
               ? "Configured security evaluation rules determining model promotion and release eligibility."
               : activeTab === "audit"
-              ? "Cryptographically traceable timeline of all uploads, scans, evaluations, and decisions."
-              : "Enterprise release policy control center, approval gatekeeping, and immutable audit logs."}
+              ? "Traceable timeline of uploads, scans, policy evaluations, decisions, and replay records."
+              : "Release policies, human review, decision passports, and the audit history behind each outcome."}
           </p>
         </div>
 
@@ -214,7 +218,7 @@ export default function GovernancePage({
               <h2>
                 Audit Trail <small>{filteredAudit.length} events</small>
               </h2>
-              <p>Tamper-evident record of all intake, evaluation, decisions, and passport generation.</p>
+              <p>Recorded history of intake, evaluation, reviewer actions, replays, and passport generation.</p>
             </div>
             {activeTab === "all" && (
               <button
@@ -237,6 +241,7 @@ export default function GovernancePage({
               {[
                 { label: "All Events", value: "ALL" },
                 { label: "Decisions", value: "DECISION_RECORDED" },
+                { label: "Decision replays", value: "DECISION_REPLAY" },
                 { label: "Policy Checks", value: "POLICY_EVALUATION" },
                 { label: "Passports", value: "PASSPORT_GENERATED" },
                 { label: "Scans", value: "SCAN_COMPLETED" },
@@ -244,7 +249,8 @@ export default function GovernancePage({
               ].map((f) => (
                 <button
                   key={f.value}
-                  className={`btn outline ${auditFilter === f.value ? "primary" : ""}`}
+                  className="btn outline selected-filter"
+                  aria-pressed={auditFilter === f.value}
                   style={{ padding: "4px 10px", fontSize: 11 }}
                   onClick={() => setAuditFilter(f.value)}
                 >

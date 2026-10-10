@@ -27,7 +27,6 @@ const labels: Record<SecurityTab, string> = {
   graph: "Evidence graph",
   provenance: "Provenance",
   passport: "Security Passport",
-  decision: "Governance Decision",
 };
 
 function Findings({

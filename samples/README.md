@@ -1,0 +1,1 @@
+sample-empty-model.safetensors is a 10-byte synthetic Safetensors container with an empty tensor map. It is intended only to exercise ModelShield upload and structural scanning. It contains no model weights and cannot be used for inference.
